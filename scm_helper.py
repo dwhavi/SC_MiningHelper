@@ -979,17 +979,32 @@ class Calibrator:
         self.canvas.bind("<ButtonRelease-1>", self._release)
         self.win.bind("<Escape>", lambda e: self.cancel())
         self.rect = None
+        self.rect_label = None
         self.regions = {}
+        # 현재 설정된 영역을 기준선으로 항상 표시 (F11 표시와 동일한 색)
+        self._draw_reference(cfg.get("rs_region"), "현재 RS 영역", "#22d3ee")
+        self._draw_reference(cfg.get("panel_region"), "현재 패널 영역", "#e879f9")
         self._set_hint()
         self.win.focus_force()
+
+    def _draw_reference(self, r, label, color):
+        if not r:
+            return
+        x0, y0 = r["left"], r["top"]
+        self.canvas.create_rectangle(x0, y0, x0 + r["width"],
+                                     y0 + r["height"], outline=color,
+                                     width=2, dash=(6, 4))
+        self.canvas.create_text(x0 + 8, y0 + 6, text=label, fill=color,
+                                anchor="nw",
+                                font=(self._family, 12, "bold"))
 
     def _set_hint(self):
         if self.stage == 0:
             self.hint.configure(
-                text="1/2: 스캔 시 RS 숫자가 뜨는 자리를 드래그 (ESC 취소)")
+                text="1/2: RS 숫자(핀 상자) 자리를 드래그하면 바로 저장됨 (ESC 취소)")
         else:
             self.hint.configure(
-                text="2/2: 근접 스캔 광물 목록/수치 패널 자리를 드래그 (ESC 취소)")
+                text="2/2: 근접 스캔 패널 자리를 드래그 (ESC = RS만 저장하고 완료)")
 
     def _press(self, e):
         self.start = (e.x, e.y)
@@ -1015,6 +1030,13 @@ class Calibrator:
             return  # 너무 작은 드래그는 무시
         key = "rs_region" if self.stage == 0 else "panel_region"
         self.regions[key] = {"left": left, "top": top, "width": w, "height": h}
+        if self.rect_label:
+            self.canvas.delete(self.rect_label)
+        self.rect_label = self.canvas.create_text(
+            left + 8, top + 6,
+            text="새 RS 영역 저장됨" if self.stage == 0 else "새 패널 영역 저장됨",
+            fill="#00e5ff", anchor="nw",
+            font=(self._family, 12, "bold"))
         if self.stage == 0:
             self.stage = 1
             self._set_hint()
@@ -1022,8 +1044,10 @@ class Calibrator:
             self.finish()
 
     def finish(self):
-        self.cfg["rs_region"] = self.regions.get("rs_region")
-        self.cfg["panel_region"] = self.regions.get("panel_region")
+        if self.regions.get("rs_region"):
+            self.cfg["rs_region"] = self.regions["rs_region"]
+        if self.regions.get("panel_region"):
+            self.cfg["panel_region"] = self.regions["panel_region"]
         self.cfg["capture_enabled"] = True
         self.cfg["scan_enabled"] = True
         save_config(self.cfg)
@@ -1031,8 +1055,12 @@ class Calibrator:
         self.on_done(True)
 
     def cancel(self):
-        self.win.destroy()
-        self.on_done(False)
+        # 1단계(RS)까지 지정했으면 그것만 저장하고 완료, 아무것도 없으면 취소
+        if self.regions:
+            self.finish()
+        else:
+            self.win.destroy()
+            self.on_done(False)
 
 
 class ControlApp:
