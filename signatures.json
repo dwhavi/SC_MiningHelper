@@ -1,0 +1,20 @@
+{
+  "_comment": "RS 시그니처 = 광물 고정값 × 암석 개수. 출처: jokersgambit.org/mining (2026-11-14 확인). 패치로 값이 바뀌면 이 파일만 수정.",
+  "ship_ores": {
+    "Quantainium": 3170, "Stileron": 3185, "Savrilium": 3200,
+    "Ouratite": 3370, "Riccite": 3385, "Lindinium": 3400,
+    "Beryl": 3540, "Taranite": 3555, "Borase": 3570, "Gold": 3585,
+    "Bexalite": 3600, "Laranite": 3825, "Aslarite": 3840,
+    "Titanium": 3855, "Tungsten": 3870, "Agricium": 3885, "Torite": 3900,
+    "Hephaestanite": 4180, "Tin": 4195, "Quartz": 4210, "Corundum": 4225,
+    "Copper": 4240, "Silicon": 4255, "Iron": 4270, "Aluminum": 4285, "Ice": 4300
+  },
+  "roc_gems": {
+    "_comment": "ROC 차량 채굴 전용 (개당 4000, 프로스펙터 채굴 판정 대상 아님)",
+    "Beradom": 4000, "Feynmaline": 4000, "Glacosite": 4000
+  },
+  "hand_gems": {
+    "_comment": "손 채굴 전용 (개당 3000, 판정 대상 아님)",
+    "Aphorite": 3000, "Dolivine": 3000, "Hadanite": 3000, "Janalite": 3000
+  }
+}
