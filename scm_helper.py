@@ -517,10 +517,20 @@ _DIM = "#9e9e9e"
 _GREEN = "#3ddc84"
 _ORANGE = "#ffb74d"
 _RED = "#ff5252"
-_FONT = ("Malgun Gothic", 11, "bold")
-_FONT_SM = ("Malgun Gothic", 10)
+_ACCENT = "#2eccbe"
 _VERDICT_COLOR = {"ok": _GREEN, "hard": _ORANGE, "infeasible": _RED,
                   "unknown": _DIM}
+
+LAST_ERROR = None  # 제어 창에 표시할 마지막 오류
+
+
+def _pick_font_family(root):
+    import tkinter.font as tkfont
+    fams = set(tkfont.families(root))
+    for cand in ("Malgun Gothic", "Noto Sans CJK KR", "Apple SD Gothic Neo"):
+        if cand in fams:
+            return cand
+    return "TkDefaultFont"
 
 
 def _win32_set_clickthrough(win, transparent=True):
@@ -545,10 +555,13 @@ def _win32_set_clickthrough(win, transparent=True):
 class OverlayWindow:
     """게임 위에 뜨는 투명 클릭통과 결과 창."""
 
-    def __init__(self, root, cfg):
+    def __init__(self, root, cfg, family):
         import tkinter as tk
         self.tk = tk
         self.cfg = cfg
+        self.FONT = (family, 11, "bold")
+        self.FONT_SM = (family, 10)
+        self.FONT_LG = (family, 13, "bold")
         self.win = tk.Toplevel(root)
         self.win.overrideredirect(True)
         self.win.attributes("-topmost", True)
@@ -556,20 +569,35 @@ class OverlayWindow:
         self.lines = []
         for _ in range(9):
             lbl = tk.Label(self.win, text="", bg=_BG, fg=_FG,
-                           font=_FONT, anchor="w", justify="left")
+                           font=self.FONT, anchor="w", justify="left")
             lbl.pack(anchor="w")
             self.lines.append(lbl)
+        self._fit_width()
         self.visible = True
         self.adjusting = False
         self._drag = None
         self._last_render = None
         self.apply_geometry()
         self.apply_opacity()
-        self.win.attributes("-transparentcolor", _BG)
+        try:
+            self.win.attributes("-transparentcolor", _BG)
+        except Exception as e:
+            print(f"[overlay] 투명 키 설정 실패: {e}")
         self.win.bind("<ButtonPress-1>", self._press)
         self.win.bind("<B1-Motion>", self._move)
         self.win.bind("<ButtonRelease-1>", self._release)
         _win32_set_clickthrough(self.win, True)
+
+    def _fit_width(self):
+        w = int(self.cfg.get("overlay_width", 380))
+        for lbl in self.lines:
+            lbl.configure(wraplength=w - 12)
+
+    def _fit_height(self):
+        self.win.update_idletasks()
+        h = max(self.win.winfo_reqheight(), 1)
+        w = int(self.cfg.get("overlay_width", 380))
+        self.win.geometry(f"{w}x{h}+{self.win.winfo_x()}+{self.win.winfo_y()}")
 
     def apply_geometry(self):
         w = int(self.cfg.get("overlay_width", 380))
@@ -591,9 +619,10 @@ class OverlayWindow:
         if on:
             self.win.configure(bg="#101418")
             self.lines[0].configure(text="위치 조정: 드래그로 이동, F9로 저장",
-                                    fg=_ORANGE)
+                                    fg=_ORANGE, font=self.FONT)
             for lbl in self.lines[1:]:
                 lbl.configure(text="")
+            self._fit_height()
             _win32_set_clickthrough(self.win, False)
         else:
             self.win.configure(bg=_BG)
@@ -625,9 +654,10 @@ class OverlayWindow:
     def render(self, st, scan_on):
         if self.adjusting or not self.visible:
             return
+        F, FS, FL = self.FONT, self.FONT_SM, self.FONT_LG
         rows = []  # (text, color, font)
         if not scan_on:
-            rows.append(("스캔 꺼짐 (제어 창에서 켜기)", _DIM, _FONT_SM))
+            rows.append(("스캔 꺼짐 (제어 창에서 켜기)", _DIM, FS))
         rs = st.get("rs")
         matches = st.get("matches") or []
         if rs:
@@ -635,17 +665,17 @@ class OverlayWindow:
                 names = " / ".join(
                     f"{m['mineral']} ×{m['count']}" for m in matches[:3])
                 mark = " (OCR 보정)" if any(m.get("corrected") for m in matches) else ""
-                rows.append((f"RS {rs} · {names}{mark}", _FG, _FONT))
+                rows.append((f"RS {rs} · {names}{mark}", _FG, FL))
                 rows.append((f"통상 난이도: {matches[0].get('difficulty_label', '')}",
-                             _DIM, _FONT_SM))
+                             _DIM, FS))
             else:
-                rows.append((f"RS {rs} · 알 수 없는 시그니처", _ORANGE, _FONT))
+                rows.append((f"RS {rs} · 알 수 없는 시그니처", _ORANGE, F))
         comp = st.get("composition") or []
         if comp:
             for c in comp[:6]:
-                rows.append((f"{c['name']}  {c['pct']:g}%", _FG, _FONT))
+                rows.append((f"{c['name']}  {c['pct']:g}%", _FG, F))
             if st.get("inert_pct") is not None:
-                rows.append((f"불활성 {st['inert_pct']:g}%", _DIM, _FONT_SM))
+                rows.append((f"불활성 {st['inert_pct']:g}%", _DIM, FS))
             stats = []
             if st.get("resistance_pct") is not None:
                 stats.append(f"저항 {st['resistance_pct']:g}%")
@@ -654,14 +684,14 @@ class OverlayWindow:
             if st.get("mass") is not None:
                 stats.append(f"질량 {st['mass']:g}")
             if stats:
-                rows.append((" · ".join(stats), _DIM, _FONT_SM))
+                rows.append((" · ".join(stats), _DIM, FS))
         verdict = st.get("rock_verdict")
         if verdict:
             label = verdict.get("label", "")
             if verdict.get("beta"):
                 label += " [BETA]"
             rows.append((label,
-                         _VERDICT_COLOR.get(verdict.get("level"), _FG), _FONT))
+                         _VERDICT_COLOR.get(verdict.get("level"), _FG), FL))
         if not rows:
             key = None
         else:
@@ -674,15 +704,17 @@ class OverlayWindow:
                 lbl.configure(text=rows[i][0], fg=rows[i][1], font=rows[i][2])
             else:
                 lbl.configure(text="")
+        self._fit_height()
 
 
 class Calibrator:
     """게임 화면 위에서 RS 영역/패널 영역을 두 번 드래그로 지정."""
 
-    def __init__(self, root, cfg, on_done):
+    def __init__(self, root, cfg, on_done, family="Malgun Gothic"):
         import tkinter as tk
         self.cfg = cfg
         self.on_done = on_done
+        self._family = family
         self.stage = 0
         self.start = None
         import mss
@@ -705,7 +737,7 @@ class Calibrator:
                                 cursor="cross")
         self.canvas.pack(fill="both", expand=True)
         self.hint = tk.Label(self.win, text="", bg="#000000", fg="#ffffff",
-                             font=("Malgun Gothic", 16, "bold"))
+                             font=(family, 16, "bold"))
         self.hint.place(relx=0.5, y=40, anchor="n")
         self.canvas.bind("<ButtonPress-1>", self._press)
         self.canvas.bind("<B1-Motion>", self._move)
@@ -769,65 +801,162 @@ class Calibrator:
 
 
 class ControlApp:
-    """제어 창 + 오버레이 창 + 전역 단축키. tk mainloop을 메인 스레드에서 돌린다."""
+    """customtkinter 기반 제어 창 + 오버레이 창 + 전역 단축키."""
 
     def __init__(self, cfg, state):
         import queue
-        import tkinter as tk
+        import customtkinter as ctk
+        from PIL import Image
+        self.ctk = ctk
         self.cfg = cfg
         self.state = state
         self.hotkey_q = queue.Queue()
-        self.root = tk.Tk()
-        self.root.title("SC 광물 오버레이")
-        self.root.geometry("330x390+60+60")
+        ctk.set_appearance_mode("dark")
+        self.root = ctk.CTk()
+        self.root.title("SC Mining Helper")
+        self.root.geometry("360x640+60+60")
+        self.root.resizable(False, False)
+        self.root.configure(fg_color="#0f1115")
         self.root.protocol("WM_DELETE_WINDOW", self.quit)
-        self.overlay = OverlayWindow(self.root, cfg)
-        self._build_controls()
+        family = _pick_font_family(self.root)
+        self._family = family
+        self.F_TITLE = ctk.CTkFont(family=family, size=17, weight="bold")
+        self.F_H = ctk.CTkFont(family=family, size=13, weight="bold")
+        self.F_B = ctk.CTkFont(family=family, size=12)
+        self.F_SM = ctk.CTkFont(family=family, size=11)
+        icon_path = os.path.join(BUNDLE_DIR, "icon.png")
+        self._icon_img = None
+        if os.path.exists(icon_path):
+            self._icon_img = ctk.CTkImage(Image.open(icon_path), size=(34, 34))
+            try:
+                import tkinter as tk
+                self.root.iconphoto(True, tk.PhotoImage(file=icon_path))
+            except Exception:
+                pass
+        self.overlay = OverlayWindow(self.root, cfg, family)
+        self._build()
         self._start_hotkeys()
         self.root.after(250, self._tick)
         self.root.after(150, self._drain_hotkeys)
 
-    def _build_controls(self):
-        import tkinter as tk
-        f = self.root
-        pad = {"padx": 10, "pady": 3, "fill": "x"}
-        self.status = tk.Label(f, text="", anchor="w", justify="left",
-                               font=_FONT_SM)
-        self.status.pack(**pad)
-        self.scan_btn = tk.Button(f, text="스캔 끄기", command=self.toggle_scan)
-        self.scan_btn.pack(**pad)
-        self.ov_btn = tk.Button(f, text="오버레이 숨기기 (F8)",
-                                command=self.toggle_overlay)
-        self.ov_btn.pack(**pad)
-        tk.Button(f, text="화면 영역 지정 (F10)",
-                  command=self.start_calibrate).pack(**pad)
-        tk.Button(f, text="오버레이 위치 조정 (F9)",
-                  command=self.toggle_adjust).pack(**pad)
-        op_row = tk.Frame(f)
-        op_row.pack(**pad)
-        tk.Label(op_row, text="투명도", font=_FONT_SM).pack(side="left")
-        self.opacity = tk.Scale(
-            op_row, from_=30, to=100, orient="horizontal", showvalue=True,
-            command=self._opacity_changed)
-        self.opacity.set(int(float(self.cfg.get("overlay_opacity", 0.88)) * 100))
-        self.opacity.pack(side="left", fill="x", expand=True)
-        tk.Button(f, text="태블릿/웹 페이지 열기",
-                  command=self.open_web).pack(**pad)
-        tk.Label(f, text="F8 표시/숨기기 · F9 위치조정 · F10 영역지정",
-                 font=_FONT_SM, fg="#666666").pack(**pad)
-        tk.Button(f, text="종료", command=self.quit).pack(**pad)
+    def _card(self, title):
+        ctk = self.ctk
+        card = ctk.CTkFrame(self.root, fg_color="#171a21", corner_radius=12,
+                            border_width=1, border_color="#23262e")
+        card.pack(padx=14, pady=(10, 0), fill="x")
+        head = ctk.CTkFrame(card, fg_color="transparent")
+        head.pack(fill="x", padx=14, pady=(10, 4))
+        ctk.CTkLabel(head, text=title, font=self.F_H,
+                     text_color="#e8eaf0").pack(side="left")
+        return card, head
 
-    def _opacity_changed(self, v):
-        self.cfg["overlay_opacity"] = int(v) / 100.0
-        self.overlay.apply_opacity()
+    def _build(self):
+        ctk = self.ctk
+        # ---- 헤더
+        header = ctk.CTkFrame(self.root, fg_color="transparent")
+        header.pack(fill="x", padx=16, pady=(14, 2))
+        if self._icon_img:
+            ctk.CTkLabel(header, text="", image=self._icon_img).pack(side="left")
+        ctk.CTkLabel(header, text="  SC 광물 오버레이",
+                     font=self.F_TITLE, text_color="#f2f4f8").pack(side="left")
+        self.pill = ctk.CTkLabel(header, text="  스캔 중  ", font=self.F_SM,
+                                 fg_color="#12312e", text_color=_ACCENT,
+                                 corner_radius=10)
+        self.pill.pack(side="right", pady=6)
+
+        # ---- 스캔 카드
+        card, head = self._card("스캔")
+        self.scan_sw = ctk.CTkSwitch(
+            head, text="", width=42, command=self._scan_switch,
+            progress_color=_ACCENT)
+        self.scan_sw.pack(side="right")
+        if self.cfg.get("scan_enabled", True):
+            self.scan_sw.select()
+        self.last_scan = ctk.CTkLabel(card, text="아직 스캔 없음",
+                                      font=self.F_B, text_color="#9aa0ab")
+        self.last_scan.pack(anchor="w", padx=14, pady=(0, 10))
+
+        # ---- 오버레이 카드
+        card, head = self._card("오버레이")
+        self.ov_sw = ctk.CTkSwitch(head, text="", width=42,
+                                   command=self._ov_switch,
+                                   progress_color=_ACCENT)
+        self.ov_sw.pack(side="right")
+        self.ov_sw.select()
+        op_row = ctk.CTkFrame(card, fg_color="transparent")
+        op_row.pack(fill="x", padx=14, pady=(2, 0))
+        ctk.CTkLabel(op_row, text="투명도", font=self.F_SM,
+                     text_color="#9aa0ab").pack(side="left")
+        self.op_label = ctk.CTkLabel(op_row, text="", font=self.F_SM,
+                                     text_color="#9aa0ab")
+        self.op_label.pack(side="right")
+        self.opacity = ctk.CTkSlider(
+            card, from_=30, to=100, command=self._opacity_changed,
+            progress_color=_ACCENT, button_color=_ACCENT,
+            button_hover_color="#25a89b")
+        self.opacity.set(float(self.cfg.get("overlay_opacity", 0.88)) * 100)
+        self.opacity.pack(fill="x", padx=14, pady=(0, 6))
+        ctk.CTkButton(card, text="위치 조정 (F9)", command=self.toggle_adjust,
+                      fg_color="#23262e", hover_color="#2c313b",
+                      text_color="#e8eaf0", height=30).pack(
+            fill="x", padx=14, pady=(0, 12))
+
+        # ---- 설정 카드
+        card, head = self._card("설정")
+        ctk.CTkButton(card, text="화면 영역 지정 (F10)",
+                      command=self.start_calibrate,
+                      fg_color=_ACCENT, hover_color="#25a89b",
+                      text_color="#062622", height=32,
+                      font=self.F_H).pack(fill="x", padx=14, pady=(2, 6))
+        ctk.CTkButton(card, text="태블릿/웹에서 보기", command=self.open_web,
+                      fg_color="#23262e", hover_color="#2c313b",
+                      text_color="#e8eaf0", height=30).pack(
+            fill="x", padx=14, pady=(0, 4))
+        self.srv_label = ctk.CTkLabel(card, text="", font=self.F_SM,
+                                      text_color="#6b7078")
+        self.srv_label.pack(anchor="w", padx=14, pady=(0, 10))
+
+        # ---- 오류 배너
+        self.err_banner = ctk.CTkLabel(self.root, text="", font=self.F_SM,
+                                       fg_color="#3a1d20", text_color="#ff8a80",
+                                       corner_radius=8, wraplength=320)
+
+        # ---- 푸터
+        ctk.CTkLabel(self.root,
+                     text="F8 표시/숨기기 · F9 위치 · F10 영역 지정",
+                     font=self.F_SM, text_color="#565b64").pack(pady=(12, 0))
+        ctk.CTkButton(self.root, text="종료", command=self.quit, width=90,
+                      fg_color="transparent", hover_color="#3a1d20",
+                      text_color="#ff8a80", height=28).pack(pady=(6, 10))
+
+    def _scan_switch(self):
+        self.cfg["scan_enabled"] = bool(self.scan_sw.get())
         save_config(self.cfg)
+
+    def _ov_switch(self):
+        if bool(self.ov_sw.get()) != self.overlay.visible:
+            self.overlay.toggle_visible()
 
     def toggle_scan(self):
         self.cfg["scan_enabled"] = not self.cfg.get("scan_enabled", True)
+        if self.cfg["scan_enabled"]:
+            self.scan_sw.select()
+        else:
+            self.scan_sw.deselect()
         save_config(self.cfg)
 
     def toggle_overlay(self):
         self.overlay.toggle_visible()
+        if self.overlay.visible:
+            self.ov_sw.select()
+        else:
+            self.ov_sw.deselect()
+
+    def _opacity_changed(self, v):
+        self.cfg["overlay_opacity"] = round(float(v)) / 100.0
+        self.overlay.apply_opacity()
+        self.op_label.configure(text=f"{int(float(v))}%")
+        save_config(self.cfg)
 
     def toggle_adjust(self):
         self.overlay.set_adjust(not self.overlay.adjusting)
@@ -841,7 +970,7 @@ class ControlApp:
             if ok:
                 self.overlay._last_render = None
 
-        self._calib = Calibrator(self.root, self.cfg, done)
+        self._calib = Calibrator(self.root, self.cfg, done, self._family)
 
     def open_web(self):
         import webbrowser
@@ -849,8 +978,10 @@ class ControlApp:
 
     def quit(self):
         save_config(self.cfg)
-        self.root.destroy()
-        os._exit(0)
+        try:
+            self.root.destroy()
+        finally:
+            os._exit(0)
 
     # -- 전역 단축키 (Windows RegisterHotKey, 관리자 권한 불필요) --
     def _start_hotkeys(self):
@@ -886,20 +1017,33 @@ class ControlApp:
         self.root.after(150, self._drain_hotkeys)
 
     def _tick(self):
+        global LAST_ERROR
         st = self.state.get()
         scan_on = self.cfg.get("scan_enabled", True)
-        self.scan_btn.configure(
-            text="스캔 끄기" if scan_on else "스캔 켜기 (현재 꺼짐)")
-        self.ov_btn.configure(
-            text="오버레이 숨기기 (F8)" if self.overlay.visible
-            else "오버레이 보이기 (F8)")
         port = self.cfg.get("port", 8377)
-        rs_txt = f"RS {st.get('rs')}" if st.get("rs") else "-"
-        region_ok = "설정됨" if self.cfg.get("rs_region") else "미설정 (F10)"
-        self.status.configure(
-            text=f"서버: http://localhost:{port}\n"
-                 f"캡처 영역: {region_ok}\n"
-                 f"최근 스캔: {rs_txt} ({st.get('phase', '-')})")
+        self.pill.configure(
+            text="  스캔 중  " if scan_on else "  스캔 꺼짐  ",
+            fg_color="#12312e" if scan_on else "#2a2d34",
+            text_color=_ACCENT if scan_on else "#9aa0ab")
+        rs = st.get("rs")
+        phase = {"idle": "대기", "scan": "스캔", "close_scan": "근접 스캔",
+                 "test": "테스트"}.get(st.get("phase"), st.get("phase", "-"))
+        region_ok = bool(self.cfg.get("rs_region"))
+        if rs:
+            txt = f"RS {rs} · {phase} · {st.get('updated_at', '')}"
+        elif region_ok:
+            txt = f"대기 중 ({phase})"
+        else:
+            txt = "캡처 영역 미설정 — F10으로 지정"
+        self.last_scan.configure(text=txt)
+        self.srv_label.configure(
+            text=f"http://localhost:{port}  ·  같은 Wi-Fi: http://{lan_ip()}:{port}")
+        if LAST_ERROR:
+            self.err_banner.configure(text=f"최근 오류: {LAST_ERROR}")
+            self.err_banner.pack(padx=14, pady=(10, 0), fill="x",
+                                 before=self.root.children[list(self.root.children)[-1]])
+        else:
+            self.err_banner.pack_forget()
         self.overlay.render(st, scan_on)
         self.root.after(250, self._tick)
 
@@ -911,6 +1055,7 @@ class ControlApp:
 
 def capture_loop(cfg, state):
     """cfg를 매 주기 다시 읽어 캘리브레이션/스캔 토글이 재시작 없이 반영되게 한다."""
+    global LAST_ERROR
     engine = None
     cap = None
     known = list(load_data("minerals.json")["minerals"].keys())
@@ -948,6 +1093,7 @@ def capture_loop(cfg, state):
                     print(f"[capture] 패널: {panel}")
                     state.update_scan(panel=panel)
         except Exception as e:
+            LAST_ERROR = f"{type(e).__name__}: {e}"
             print(f"[capture] 오류 (계속 시도): {e}")
             interval = 1.0
         time.sleep(interval)
@@ -964,7 +1110,44 @@ def lan_ip():
         return "알 수 없음"
 
 
+def _setup_windowed_logging():
+    """콘솔 없는 exe: 출력을 로그 파일로 돌리고, 치명적 오류는 앱 창/로그에 표시."""
+    import traceback
+    if getattr(sys, "frozen", False):
+        try:
+            log = open(os.path.join(EXE_DIR, "scm_helper.log"), "a",
+                       encoding="utf-8", buffering=1)
+            if sys.stdout is None or not hasattr(sys.stdout, "write"):
+                sys.stdout = log
+            if sys.stderr is None or not hasattr(sys.stderr, "write"):
+                sys.stderr = log
+        except OSError:
+            pass
+
+    def hook(etype, value, tb):
+        global LAST_ERROR
+        LAST_ERROR = f"{etype.__name__}: {value}"
+        try:
+            traceback.print_exception(etype, value, tb)
+        except Exception:
+            pass
+
+    sys.excepthook = hook
+
+    def thread_hook(args):
+        global LAST_ERROR
+        LAST_ERROR = f"{args.exc_type.__name__}: {args.exc_value}"
+        try:
+            traceback.print_exception(args.exc_type, args.exc_value,
+                                      args.exc_traceback)
+        except Exception:
+            pass
+
+    threading.excepthook = thread_hook
+
+
 def main():
+    _setup_windowed_logging()
     cfg = load_config()
     state = ScanState(load_data("signatures.json"),
                       load_data("minerals.json")["minerals"],
