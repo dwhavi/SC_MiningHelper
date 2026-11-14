@@ -578,13 +578,36 @@ def _win32_set_clickthrough(win, transparent=True):
     u32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
 
 
+_RARITY_KR = {"legendary": "레전드", "epic": "에픽", "rare": "레어",
+              "uncommon": "언커먼", "common": "커먼"}
+
+
+def mineral_info_lines(name, minerals):
+    """오버레이 하단에 표시할 광물 간략 정보 (최대 2줄, 검증된 데이터만)."""
+    m = (minerals or {}).get(name)
+    if not m:
+        return []
+    parts = [name]
+    tier = _RARITY_KR.get(m.get("rarity"))
+    if tier:
+        parts.append(tier + " 등급")
+    price = m.get("value_auec_scu")
+    if price:
+        parts.append(f"시세 ~{price:,} aUEC/SCU")
+    lines = [" · ".join(parts)]
+    if m.get("special"):
+        lines.append(m["special"])
+    return lines
+
+
 class OverlayWindow:
     """게임 위에 뜨는 투명 클릭통과 결과 창."""
 
-    def __init__(self, root, cfg, family):
+    def __init__(self, root, cfg, family, minerals=None):
         import tkinter as tk
         self.tk = tk
         self.cfg = cfg
+        self._minerals = minerals or {}
         self.FONT = (family, 11, "bold")
         self.FONT_SM = (family, 10)
         self.FONT_LG = (family, 13, "bold")
@@ -593,7 +616,7 @@ class OverlayWindow:
         self.win.attributes("-topmost", True)
         self.win.configure(bg=_BG)
         self.lines = []
-        for _ in range(9):
+        for _ in range(11):
             lbl = tk.Label(self.win, text="", bg=_BG, fg=_FG,
                            font=self.FONT, anchor="center", justify="center")
             lbl.pack(fill="x")
@@ -726,6 +749,14 @@ class OverlayWindow:
                 label += " [BETA]"
             rows.append((label,
                          _VERDICT_COLOR.get(verdict.get("level"), _FG), FL))
+        target = None
+        if comp:
+            target = comp[0]["name"]
+        elif matches:
+            target = matches[0]["mineral"]
+        if target:
+            for info in mineral_info_lines(target, self._minerals):
+                rows.append((info, _DIM, FS))
         if not rows:
             key = None
         else:
@@ -865,7 +896,8 @@ class ControlApp:
             self.root.iconphoto(True, ImageTk.PhotoImage(icon_img))
         except Exception:
             pass
-        self.overlay = OverlayWindow(self.root, cfg, family)
+        self.overlay = OverlayWindow(self.root, cfg, family,
+                                     minerals=self.state._minerals)
         self._build()
         self._start_hotkeys()
         self.root.after(250, self._tick)
