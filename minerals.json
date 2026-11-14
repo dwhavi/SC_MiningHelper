@@ -1,0 +1,31 @@
+{
+  "_comment": "광물별 기본 저항(0~1 계수)/불안정도/희귀도. 출처: starcitizen.tools 각 광물 문서 (4.10.2~4.10.3 버전 표기, 2026-11-14 확인). null은 미확인. 실제 바위값은 바위마다 다르므로 최종 판정은 근접 스캔 OCR 실측값 사용.",
+  "minerals": {
+    "Quantainium":  {"resistance": 0.95, "instability": 1000, "rarity": "legendary"},
+    "Savrilium":    {"resistance": 0.95, "instability": 1000, "rarity": "legendary"},
+    "Lindinium":    {"resistance": 0.95, "instability": 1000, "rarity": "epic"},
+    "Riccite":      {"resistance": 0.95, "instability": 850,  "rarity": "epic"},
+    "Stileron":     {"resistance": 0.6,  "instability": 870,  "rarity": "legendary"},
+    "Ouratite":     {"resistance": 0.6,  "instability": 600,  "rarity": "epic"},
+    "Bexalite":     {"resistance": 0.6,  "instability": 600,  "rarity": "common"},
+    "Beryl":        {"resistance": 0.65, "instability": 350,  "rarity": "rare"},
+    "Taranite":     {"resistance": 0.5,  "instability": 700,  "rarity": "rare"},
+    "Gold":         {"resistance": 0.5,  "instability": 550,  "rarity": "rare"},
+    "Laranite":     {"resistance": 0.5,  "instability": 400,  "rarity": "uncommon"},
+    "Agricium":     {"resistance": 0.5,  "instability": 350,  "rarity": "uncommon"},
+    "Hephaestanite":{"resistance": null, "instability": 400,  "rarity": "common"},
+    "Borase":       {"resistance": 0.3,  "instability": 40,   "rarity": "rare"},
+    "Corundum":     {"resistance": 0.1,  "instability": 50,   "rarity": "rare"},
+    "Iron":         {"resistance": null, "instability": 50,   "rarity": "common"},
+    "Copper":       {"resistance": null, "instability": 50,   "rarity": "common"},
+    "Quartz":       {"resistance": null, "instability": 50,   "rarity": "common"},
+    "Titanium":     {"resistance": 0.1,  "instability": null, "rarity": "uncommon"},
+    "Aluminum":     {"resistance": null, "instability": null, "rarity": "common"},
+    "Tin":          {"resistance": null, "instability": null, "rarity": "common"},
+    "Tungsten":     {"resistance": null, "instability": null, "rarity": "uncommon"},
+    "Aslarite":     {"resistance": null, "instability": null, "rarity": "uncommon"},
+    "Torite":       {"resistance": null, "instability": null, "rarity": "common"},
+    "Silicon":      {"resistance": null, "instability": null, "rarity": "common"},
+    "Ice":          {"resistance": null, "instability": null, "rarity": "common"}
+  }
+}
