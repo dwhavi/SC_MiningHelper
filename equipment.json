@@ -1,0 +1,23 @@
+{
+  "_comment": "판정 기준 장비. 출처: starcitizen.tools Helix I / Rieger-C3 / Focus III 문서 (4.10.2~4.10.3), scminer.rocks 비교 데이터. 합산치는 사전 계산값. 나중에 장비를 바꾸면 이 파일만 수정.",
+  "name": "Prospector 기준: Helix I + Rieger-C3 + Focus III",
+  "laser": {
+    "name": "Helix I",
+    "power_min": 780, "power_max": 3900,
+    "resistance_modifier": -0.30,
+    "optimal_window_modifier": -0.40,
+    "inert_modifier": -0.30,
+    "extraction_rate": 1850,
+    "optimal_range_m": 15, "max_range_m": 45
+  },
+  "modules": [
+    {"name": "Rieger-C3", "power_modifier": 0.25, "optimal_window_modifier": -0.01},
+    {"name": "Focus III", "power_modifier": -0.05, "optimal_window_modifier": 0.40, "inert_modifier": -0.01}
+  ],
+  "combined": {
+    "power_min": 936, "power_max": 4680,
+    "resistance_modifier": -0.30,
+    "optimal_window_modifier": -0.01,
+    "inert_modifier": -0.31
+  }
+}
