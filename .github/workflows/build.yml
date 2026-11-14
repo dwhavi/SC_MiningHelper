@@ -23,11 +23,14 @@ jobs:
 
       - name: Build one-file exe
         run: |
-          pyinstaller --noconfirm --onefile --name SCMiningHelper `
+          pyinstaller --noconfirm --onefile --noconsole --name SCMiningHelper `
+            --icon icon.ico `
             --collect-all rapidocr_onnxruntime --collect-all onnxruntime `
+            --collect-all customtkinter `
             --add-data "signatures.json;." --add-data "minerals.json;." `
             --add-data "equipment.json;." --add-data "config.json;." `
-            --add-data "overlay.html;." --add-data "calibrate.html;." scm_helper.py
+            --add-data "overlay.html;." --add-data "calibrate.html;." `
+            --add-data "icon.png;." scm_helper.py
 
       - name: Smoke test the exe on Windows
         shell: pwsh
