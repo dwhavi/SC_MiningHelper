@@ -524,6 +524,32 @@ _VERDICT_COLOR = {"ok": _GREEN, "hard": _ORANGE, "infeasible": _RED,
 LAST_ERROR = None  # 제어 창에 표시할 마지막 오류
 
 
+def _make_icon_image(size=256):
+    """앱 아이콘을 런타임에 그린다 (별도 파일 불필요): 어두운 배경 + 청록 크리스탈."""
+    from PIL import Image, ImageDraw
+    S = size
+    img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    r = int(S * 0.22)
+    d.rounded_rectangle([0, 0, S - 1, S - 1], radius=r, fill=(18, 20, 26, 255))
+    d.rounded_rectangle([3, 3, S - 4, S - 4], radius=r - 3,
+                        outline=(45, 52, 64, 255), width=max(2, S // 85))
+    cx = S // 2
+    top, mid, bot = int(S * 0.20), int(S * 0.42), int(S * 0.80)
+    half = int(S * 0.24)
+    d.polygon([(cx, top), (cx + half, mid), (cx, bot), (cx - half, mid)],
+              fill=(46, 204, 190, 255))
+    d.polygon([(cx, top), (cx + half, mid), (cx, int(S * 0.50))],
+              fill=(84, 232, 214, 255))
+    d.polygon([(cx, top), (cx - half, mid), (cx, int(S * 0.50))],
+              fill=(28, 160, 150, 255))
+    d.polygon([(cx - half, mid), (cx, int(S * 0.50)), (cx, bot)],
+              fill=(22, 128, 120, 255))
+    d.polygon([(cx + half, mid), (cx, int(S * 0.50)), (cx, bot)],
+              fill=(34, 178, 168, 255))
+    return img
+
+
 def _pick_font_family(root):
     import tkinter.font as tkfont
     fams = set(tkfont.families(root))
@@ -824,15 +850,13 @@ class ControlApp:
         self.F_H = ctk.CTkFont(family=family, size=13, weight="bold")
         self.F_B = ctk.CTkFont(family=family, size=12)
         self.F_SM = ctk.CTkFont(family=family, size=11)
-        icon_path = os.path.join(BUNDLE_DIR, "icon.png")
-        self._icon_img = None
-        if os.path.exists(icon_path):
-            self._icon_img = ctk.CTkImage(Image.open(icon_path), size=(34, 34))
-            try:
-                import tkinter as tk
-                self.root.iconphoto(True, tk.PhotoImage(file=icon_path))
-            except Exception:
-                pass
+        icon_img = _make_icon_image(128)
+        self._icon_img = ctk.CTkImage(icon_img, size=(34, 34))
+        try:
+            from PIL import ImageTk
+            self.root.iconphoto(True, ImageTk.PhotoImage(icon_img))
+        except Exception:
+            pass
         self.overlay = OverlayWindow(self.root, cfg, family)
         self._build()
         self._start_hotkeys()
