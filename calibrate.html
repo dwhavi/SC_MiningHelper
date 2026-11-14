@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>SC 광물 오버레이 - 캘리브레이션</title>
+<style>
+  body { background: #0b0f14; color: #e8eef5; margin: 0;
+         font-family: "Malgun Gothic", "Segoe UI", sans-serif; }
+  #bar { padding: 10px 14px; font-size: 15px; background: #141b24;
+         position: sticky; top: 0; z-index: 2; display: flex; gap: 10px;
+         align-items: center; flex-wrap: wrap; }
+  #bar button { background: #1f6feb; border: 0; color: #fff;
+                border-radius: 4px; padding: 5px 12px; cursor: pointer; }
+  #bar button.secondary { background: #2a3542; }
+  #stage { position: relative; display: inline-block; }
+  #shot { display: block; max-width: 100vw; cursor: crosshair; }
+  .rect { position: absolute; border: 2px solid #4dff88;
+          background: rgba(77, 255, 136, 0.12); pointer-events: none; }
+  #hint { color: #f5c542; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <span id="hint">1/2단계: 스캔했을 때 RS 숫자가 뜨는 자리를 드래그로 감싸세요</span>
+  <button id="next" class="secondary" disabled>다음 (Enter)</button>
+  <button id="save" disabled>저장</button>
+  <button id="reshot" class="secondary">화면 다시 캡처</button>
+  <span id="msg"></span>
+</div>
+<div id="stage"><img id="shot" src="/api/screenshot"></div>
+<script>
+let step = 0;               // 0: RS 영역, 1: 패널 영역, 2: 완료
+let regions = {};
+let start = null, cur = null;
+const stage = document.getElementById("stage");
+const shot = document.getElementById("shot");
+const hint = document.getElementById("hint");
+const nextBtn = document.getElementById("next");
+const saveBtn = document.getElementById("save");
+const msg = document.getElementById("msg");
+let rectEls = [];
+
+function scale() { return shot.naturalWidth / shot.clientWidth; }
+
+shot.addEventListener("mousedown", (e) => {
+  if (step > 1) return;
+  const r = shot.getBoundingClientRect();
+  start = {x: e.clientX - r.left, y: e.clientY - r.top};
+  cur = start;
+});
+window.addEventListener("mousemove", (e) => {
+  if (!start) return;
+  const r = shot.getBoundingClientRect();
+  cur = {x: Math.max(0, Math.min(e.clientX - r.left, r.width)),
+         y: Math.max(0, Math.min(e.clientY - r.top, r.height))};
+  drawTemp();
+});
+window.addEventListener("mouseup", () => {
+  if (!start || !cur) return;
+  const s = scale();
+  const region = {
+    left: Math.round(Math.min(start.x, cur.x) * s),
+    top: Math.round(Math.min(start.y, cur.y) * s),
+    width: Math.round(Math.abs(cur.x - start.x) * s),
+    height: Math.round(Math.abs(cur.y - start.y) * s)};
+  if (region.width < 10 || region.height < 10) { start = null; return; }
+  regions[step === 0 ? "rs_region" : "panel_region"] = region;
+  start = null;
+  nextBtn.disabled = false;
+});
+
+function drawTemp() {
+  rectEls.forEach(el => el.remove()); rectEls = [];
+  const all = [];
+  if (regions.rs_region) all.push(regions.rs_region);
+  if (regions.panel_region) all.push(regions.panel_region);
+  if (start && cur) all.push({
+    left: Math.min(start.x, cur.x) * scale(),
+    top: Math.min(start.y, cur.y) * scale(),
+    width: Math.abs(cur.x - start.x) * scale(),
+    height: Math.abs(cur.y - start.y) * scale()});
+  const s = scale();
+  for (const rg of all) {
+    const el = document.createElement("div");
+    el.className = "rect";
+    el.style.left = (rg.left / s) + "px";
+    el.style.top = (rg.top / s) + "px";
+    el.style.width = (rg.width / s) + "px";
+    el.style.height = (rg.height / s) + "px";
+    stage.appendChild(el); rectEls.push(el);
+  }
+}
+
+function advance() {
+  if (step === 0 && regions.rs_region) {
+    step = 1; nextBtn.disabled = true;
+    hint.textContent = "2/2단계: 근접 스캔 결과(광물 목록과 %)가 뜨는 자리를 드래그로 감싸세요";
+  } else if (step === 1 && regions.panel_region) {
+    step = 2; nextBtn.disabled = true; saveBtn.disabled = false;
+    hint.textContent = "저장을 누르면 완료됩니다";
+  }
+  drawTemp();
+}
+nextBtn.onclick = advance;
+window.addEventListener("keydown", (e) => { if (e.key === "Enter") advance(); });
+
+document.getElementById("reshot").onclick = () => {
+  shot.src = "/api/screenshot?t=" + Date.now();
+};
+
+saveBtn.onclick = async () => {
+  const res = await fetch("/api/calibrate", {method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(regions)});
+  const j = await res.json();
+  msg.textContent = j.ok
+    ? "저장 완료. run.bat(실행 창)을 껐다가 다시 시작하면 적용됩니다."
+    : "저장 실패: " + (j.error ?? "");
+};
+</script>
+</body>
+  </html>
