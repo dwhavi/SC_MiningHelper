@@ -2,21 +2,22 @@
   "host": "0.0.0.0",
   "port": 8377,
   "capture_enabled": true,
+  "scan_enabled": true,
   "monitor": 1,
   "rs_region": null,
   "panel_region": null,
   "poll_interval_ms": 500,
   "ocr_engine": "auto",
+  "overlay_enabled": true,
+  "overlay_x": 1150,
+  "overlay_y": 320,
+  "overlay_width": 380,
+  "overlay_opacity": 0.88,
   "verdict_thresholds": {
     "beta": true,
     "resist_ok_pct": 30.0,
     "resist_hard_pct": 55.0,
     "instability_hard": 800
   },
-  "scan_enabled": true,
-  "overlay_enabled": true,
-  "overlay_x": 40,
-  "overlay_y": 320,
-  "overlay_width": 380,
-  "overlay_opacity": 0.88
+  "overlay_anchor_v2": true
 }
