@@ -607,12 +607,14 @@ def create_app(state, cfg):
 # 서버 전용 환경(테스트/CI)에서는 이 모듈을 로드하지 않는다.
 
 _BG = "#000000"        # transparentcolor 키 (이 색은 완전 투명)
-_FG = "#f2f2f2"
-_DIM = "#9e9e9e"
-_GREEN = "#3ddc84"
-_ORANGE = "#ffb74d"
-_RED = "#ff5252"
-_ACCENT = "#2eccbe"
+_FG = "#eef4fa"
+_DIM = "#8fa8bd"
+_GREEN = "#41d99a"
+_ORANGE = "#ffb24d"
+_RED = "#ff5f5f"
+_ACCENT = "#46c8e6"      # 홀로그램 시안
+_ACCENT_HOV = "#2ea9c6"
+_ON_ACCENT = "#03222b"
 _VERDICT_COLOR = {"ok": _GREEN, "hard": _ORANGE, "infeasible": _RED,
                   "unknown": _DIM}
 
@@ -626,22 +628,22 @@ def _make_icon_image(size=256):
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     r = int(S * 0.22)
-    d.rounded_rectangle([0, 0, S - 1, S - 1], radius=r, fill=(18, 20, 26, 255))
+    d.rounded_rectangle([0, 0, S - 1, S - 1], radius=r, fill=(12, 18, 26, 255))
     d.rounded_rectangle([3, 3, S - 4, S - 4], radius=r - 3,
-                        outline=(45, 52, 64, 255), width=max(2, S // 85))
+                        outline=(34, 54, 70, 255), width=max(2, S // 85))
     cx = S // 2
     top, mid, bot = int(S * 0.20), int(S * 0.42), int(S * 0.80)
     half = int(S * 0.24)
     d.polygon([(cx, top), (cx + half, mid), (cx, bot), (cx - half, mid)],
-              fill=(46, 204, 190, 255))
+              fill=(56, 186, 219, 255))
     d.polygon([(cx, top), (cx + half, mid), (cx, int(S * 0.50))],
-              fill=(84, 232, 214, 255))
+              fill=(110, 220, 245, 255))
     d.polygon([(cx, top), (cx - half, mid), (cx, int(S * 0.50))],
-              fill=(28, 160, 150, 255))
+              fill=(30, 140, 175, 255))
     d.polygon([(cx - half, mid), (cx, int(S * 0.50)), (cx, bot)],
-              fill=(22, 128, 120, 255))
+              fill=(24, 115, 150, 255))
     d.polygon([(cx + half, mid), (cx, int(S * 0.50)), (cx, bot)],
-              fill=(34, 178, 168, 255))
+              fill=(40, 165, 200, 255))
     return img
 
 
@@ -748,14 +750,14 @@ class RegionOverlay:
         boxes = []
         panel = cfg.get("panel_region")
         if panel:
-            boxes.append((panel, "패널 영역", "#e879f9"))
+            boxes.append((panel, "패널 영역", "#c4a2ff"))
         if cfg.get("rs_search", "wide") == "fixed":
             r = cfg.get("rs_region")
             if r:
-                boxes.append((r, "RS 영역 (고정)", "#22d3ee"))
+                boxes.append((r, "RS 영역 (고정)", "#46c8e6"))
         else:
             boxes.append((wide_rs_region(cfg, mon),
-                          "RS 넓은 검색 영역", "#facc15"))
+                          "RS 넓은 검색 영역", "#ffc857"))
         for r, label, color in boxes:
             x0, y0 = r["left"], r["top"]
             x1, y1 = x0 + r["width"], y0 + r["height"]
@@ -843,7 +845,7 @@ class OverlayWindow:
     def set_adjust(self, on):
         self.adjusting = on
         if on:
-            self.win.configure(bg="#101418")
+            self.win.configure(bg="#0b1118")
             self.lines[0].configure(text="위치 조정: 드래그로 이동, F9로 저장",
                                     fg=_ORANGE, font=self.FONT)
             for lbl in self.lines[1:]:
@@ -988,8 +990,8 @@ class Calibrator:
         self.rect_label = None
         self.regions = {}
         # 현재 설정된 영역을 기준선으로 항상 표시 (F11 표시와 동일한 색)
-        self._draw_reference(cfg.get("rs_region"), "현재 RS 영역", "#22d3ee")
-        self._draw_reference(cfg.get("panel_region"), "현재 패널 영역", "#e879f9")
+        self._draw_reference(cfg.get("rs_region"), "현재 RS 영역", "#46c8e6")
+        self._draw_reference(cfg.get("panel_region"), "현재 패널 영역", "#c4a2ff")
         self._set_hint()
         self.win.focus_force()
 
@@ -1017,7 +1019,7 @@ class Calibrator:
         if self.rect:
             self.canvas.delete(self.rect)
         self.rect = self.canvas.create_rectangle(
-            e.x, e.y, e.x, e.y, outline="#00e5ff", width=3)
+            e.x, e.y, e.x, e.y, outline="#46c8e6", width=3)
 
     def _move(self, e):
         if self.start:
@@ -1041,7 +1043,7 @@ class Calibrator:
         self.rect_label = self.canvas.create_text(
             left + 8, top + 6,
             text="새 RS 영역 저장됨" if self.stage == 0 else "새 패널 영역 저장됨",
-            fill="#00e5ff", anchor="nw",
+            fill="#46c8e6", anchor="nw",
             font=(self._family, 12, "bold"))
         if self.stage == 0:
             self.stage = 1
@@ -1085,7 +1087,7 @@ class ControlApp:
         self.root.title("SC Mining Helper")
         self.root.geometry("360x640+60+60")
         self.root.resizable(False, False)
-        self.root.configure(fg_color="#0f1115")
+        self.root.configure(fg_color="#0a0f16")
         self.root.protocol("WM_DELETE_WINDOW", self.quit)
         family = _pick_font_family(self.root)
         self._family = family
@@ -1110,13 +1112,13 @@ class ControlApp:
 
     def _card(self, title):
         ctk = self.ctk
-        card = ctk.CTkFrame(self.root, fg_color="#171a21", corner_radius=12,
-                            border_width=1, border_color="#23262e")
+        card = ctk.CTkFrame(self.root, fg_color="#0d141d", corner_radius=12,
+                            border_width=1, border_color="#1c2a38")
         card.pack(padx=14, pady=(10, 0), fill="x")
         head = ctk.CTkFrame(card, fg_color="transparent")
         head.pack(fill="x", padx=14, pady=(10, 4))
         ctk.CTkLabel(head, text=title, font=self.F_H,
-                     text_color="#e8eaf0").pack(side="left")
+                     text_color="#dfe9f2").pack(side="left")
         return card, head
 
     def _build(self):
@@ -1127,9 +1129,9 @@ class ControlApp:
         if self._icon_img:
             ctk.CTkLabel(header, text="", image=self._icon_img).pack(side="left")
         ctk.CTkLabel(header, text="  SC 광물 오버레이",
-                     font=self.F_TITLE, text_color="#f2f4f8").pack(side="left")
+                     font=self.F_TITLE, text_color="#eef4fa").pack(side="left")
         self.pill = ctk.CTkLabel(header, text="  스캔 중  ", font=self.F_SM,
-                                 fg_color="#12312e", text_color=_ACCENT,
+                                 fg_color="#0d2833", text_color=_ACCENT,
                                  corner_radius=10)
         self.pill.pack(side="right", pady=6)
 
@@ -1142,7 +1144,7 @@ class ControlApp:
         if self.cfg.get("scan_enabled", True):
             self.scan_sw.select()
         self.last_scan = ctk.CTkLabel(card, text="아직 스캔 없음",
-                                      font=self.F_B, text_color="#9aa0ab")
+                                      font=self.F_B, text_color="#7e93a6")
         self.last_scan.pack(anchor="w", padx=14, pady=(0, 10))
 
         # ---- 오버레이 카드
@@ -1155,61 +1157,65 @@ class ControlApp:
         op_row = ctk.CTkFrame(card, fg_color="transparent")
         op_row.pack(fill="x", padx=14, pady=(2, 0))
         ctk.CTkLabel(op_row, text="투명도", font=self.F_SM,
-                     text_color="#9aa0ab").pack(side="left")
+                     text_color="#7e93a6").pack(side="left")
         self.op_label = ctk.CTkLabel(op_row, text="", font=self.F_SM,
-                                     text_color="#9aa0ab")
+                                     text_color="#7e93a6")
         self.op_label.pack(side="right")
         self.opacity = ctk.CTkSlider(
             card, from_=30, to=100, command=self._opacity_changed,
             progress_color=_ACCENT, button_color=_ACCENT,
-            button_hover_color="#25a89b")
+            button_hover_color=_ACCENT_HOV)
         self.opacity.set(float(self.cfg.get("overlay_opacity", 0.88)) * 100)
         self.opacity.pack(fill="x", padx=14, pady=(0, 6))
         ctk.CTkButton(card, text="위치 조정 (F9)", command=self.toggle_adjust,
-                      fg_color="#23262e", hover_color="#2c313b",
-                      text_color="#e8eaf0", height=30).pack(
+                      fg_color="#14202c", hover_color="#1a2c3c",
+                      text_color="#dfe9f2", height=30).pack(
             fill="x", padx=14, pady=(0, 12))
 
         # ---- 설정 카드
         card, head = self._card("설정")
         ctk.CTkButton(card, text="화면 영역 지정 (F10)",
                       command=self.start_calibrate,
-                      fg_color=_ACCENT, hover_color="#25a89b",
-                      text_color="#062622", height=32,
+                      fg_color=_ACCENT, hover_color=_ACCENT_HOV,
+                      text_color=_ON_ACCENT, height=32,
                       font=self.F_H).pack(fill="x", padx=14, pady=(2, 6))
         ctk.CTkButton(card, text="스캔 영역 표시 (F11)",
                       command=self.toggle_regions,
-                      fg_color="#23262e", hover_color="#2c313b",
-                      text_color="#e8eaf0", height=30).pack(
+                      fg_color="#14202c", hover_color="#1a2c3c",
+                      text_color="#dfe9f2", height=30).pack(
             fill="x", padx=14, pady=(0, 6))
         ctk.CTkLabel(card, text="RS 읽기 방식", font=self.F_SM,
-                     text_color="#9aa0ab").pack(anchor="w", padx=14)
+                     text_color="#7e93a6").pack(anchor="w", padx=14)
         self.rs_mode_seg = ctk.CTkSegmentedButton(
             card, values=["넓게 찾기", "고정 영역"],
-            command=self._rs_mode_changed)
+            command=self._rs_mode_changed,
+            fg_color="#14202c", selected_color="#164b5e",
+            selected_hover_color="#1a5c74",
+            unselected_color="#14202c", unselected_hover_color="#1a2c3c",
+            text_color="#dfe9f2")
         self.rs_mode_seg.set("고정 영역" if self.cfg.get("rs_search") == "fixed"
                              else "넓게 찾기")
         self.rs_mode_seg.pack(fill="x", padx=14, pady=(2, 10))
         ctk.CTkButton(card, text="태블릿/웹에서 보기", command=self.open_web,
-                      fg_color="#23262e", hover_color="#2c313b",
-                      text_color="#e8eaf0", height=30).pack(
+                      fg_color="#14202c", hover_color="#1a2c3c",
+                      text_color="#dfe9f2", height=30).pack(
             fill="x", padx=14, pady=(0, 4))
         self.srv_label = ctk.CTkLabel(card, text="", font=self.F_SM,
-                                      text_color="#6b7078")
+                                      text_color="#5a6b7a")
         self.srv_label.pack(anchor="w", padx=14, pady=(0, 10))
 
         # ---- 오류 배너
         self.err_banner = ctk.CTkLabel(self.root, text="", font=self.F_SM,
-                                       fg_color="#3a1d20", text_color="#ff8a80",
+                                       fg_color="#2c1719", text_color="#f28b82",
                                        corner_radius=8, wraplength=320)
 
         # ---- 푸터
         ctk.CTkLabel(self.root,
                      text="F8 표시/숨기기 · F9 위치 · F10 영역 지정",
-                     font=self.F_SM, text_color="#565b64").pack(pady=(12, 0))
+                     font=self.F_SM, text_color="#46545f").pack(pady=(12, 0))
         ctk.CTkButton(self.root, text="종료", command=self.quit, width=90,
-                      fg_color="transparent", hover_color="#3a1d20",
-                      text_color="#ff8a80", height=28).pack(pady=(6, 10))
+                      fg_color="transparent", hover_color="#2c1719",
+                      text_color="#f28b82", height=28).pack(pady=(6, 10))
 
     def _scan_switch(self):
         self.cfg["scan_enabled"] = bool(self.scan_sw.get())
@@ -1336,8 +1342,8 @@ class ControlApp:
         port = self.cfg.get("port", 8377)
         self.pill.configure(
             text="  스캔 중  " if scan_on else "  스캔 꺼짐  ",
-            fg_color="#12312e" if scan_on else "#2a2d34",
-            text_color=_ACCENT if scan_on else "#9aa0ab")
+            fg_color="#0d2833" if scan_on else "#1a222c",
+            text_color=_ACCENT if scan_on else "#7e93a6")
         rs = st.get("rs")
         phase = {"idle": "대기", "scan": "스캔", "close_scan": "근접 스캔",
                  "test": "테스트"}.get(st.get("phase"), st.get("phase", "-"))
