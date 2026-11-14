@@ -38,7 +38,7 @@ DEFAULTS = {
     "poll_interval_ms": 500,
     "ocr_engine": "auto",
     "overlay_enabled": True,
-    "overlay_x": 40,
+    "overlay_x": 960,
     "overlay_y": 320,
     "overlay_width": 380,
     "overlay_opacity": 0.88,
@@ -595,14 +595,20 @@ class OverlayWindow:
         self.lines = []
         for _ in range(9):
             lbl = tk.Label(self.win, text="", bg=_BG, fg=_FG,
-                           font=self.FONT, anchor="w", justify="left")
-            lbl.pack(anchor="w")
+                           font=self.FONT, anchor="center", justify="center")
+            lbl.pack(fill="x")
             self.lines.append(lbl)
         self._fit_width()
         self.visible = True
         self.adjusting = False
         self._drag = None
         self._last_render = None
+        if not self.cfg.get("overlay_anchor_v2"):
+            # 구버전 config(좌상단 기준 x)를 중심 기준으로 1회 변환
+            self.cfg["overlay_x"] = int(self.cfg.get("overlay_x", 40)) \
+                + int(self.cfg.get("overlay_width", 380)) // 2
+            self.cfg["overlay_anchor_v2"] = True
+            save_config(self.cfg)
         self.apply_geometry()
         self.apply_opacity()
         try:
@@ -626,10 +632,11 @@ class OverlayWindow:
         self.win.geometry(f"{w}x{h}+{self.win.winfo_x()}+{self.win.winfo_y()}")
 
     def apply_geometry(self):
+        # overlay_x 는 상자의 가로 중심. 내용이 바뀌어도 중심이 유지된다.
         w = int(self.cfg.get("overlay_width", 380))
-        x = int(self.cfg.get("overlay_x", 40))
+        cx = int(self.cfg.get("overlay_x", 40))
         y = int(self.cfg.get("overlay_y", 320))
-        self.win.geometry(f"{w}x10+{x}+{y}")
+        self.win.geometry(f"{w}x10+{cx - w // 2}+{y}")
 
     def apply_opacity(self):
         try:
@@ -652,7 +659,8 @@ class OverlayWindow:
             _win32_set_clickthrough(self.win, False)
         else:
             self.win.configure(bg=_BG)
-            self.cfg["overlay_x"] = self.win.winfo_x()
+            w = int(self.cfg.get("overlay_width", 380))
+            self.cfg["overlay_x"] = self.win.winfo_x() + w // 2
             self.cfg["overlay_y"] = self.win.winfo_y()
             save_config(self.cfg)
             _win32_set_clickthrough(self.win, True)
