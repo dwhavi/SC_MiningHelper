@@ -884,7 +884,13 @@ class OverlayWindow:
         F, FS, FL = self.FONT, self.FONT_SM, self.FONT_LG
         rows = []  # (text, color, font)
         if not scan_on:
-            rows.append(("스캔 꺼짐 (제어 창에서 켜기)", _DIM, FS))
+            # 스캔 꺼짐: 오버레이에 아무 글자도 표시하지 않는다
+            if self._last_render is not None:
+                for lbl in self.lines:
+                    lbl.configure(text="")
+                self._last_render = None
+                self._fit_height()
+            return
         rs = st.get("rs")
         matches = st.get("matches") or []
         if rs:
