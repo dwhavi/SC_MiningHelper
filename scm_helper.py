@@ -35,6 +35,8 @@ DEFAULTS = {
     "monitor": 1,
     "rs_region": None,
     "panel_region": None,
+    "rs_search": "wide",        # wide: 넓은 영역에서 시그니처 숫자 검색 / fixed: 지정 영역만
+    "rs_wide_region": None,     # None이면 모니터 중앙 84% 자동
     "poll_interval_ms": 500,
     "ocr_engine": "auto",
     "overlay_enabled": True,
@@ -343,6 +345,10 @@ class Capturer:
         shot = self._sct.grab(self._sct.monitors[self.monitor])
         return Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
 
+    def mon_size(self):
+        mon = self._sct.monitors[self.monitor]
+        return {"width": mon["width"], "height": mon["height"]}
+
 
 # ---------------------------------------------------------------- 상태/서버
 
@@ -598,6 +604,80 @@ def mineral_info_lines(name, minerals):
     if m.get("special"):
         lines.append(m["special"])
     return lines
+
+
+def wide_rs_region(cfg, mon):
+    """RS 숫자를 찾을 넓은 영역. 함선이 바라보는 방향에 따라 숫자 위치가
+    바뀌므로 기본값은 모니터 중앙부 대부분이다."""
+    r = cfg.get("rs_wide_region")
+    if r:
+        return r
+    w, h = mon["width"], mon["height"]
+    return {"left": int(w * 0.08), "top": int(h * 0.06),
+            "width": int(w * 0.84), "height": int(h * 0.88)}
+
+
+def find_rs_candidates(lines, sig_table):
+    """OCR 줄들에서 시그니처 표와 맞는 숫자 후보만 골라낸다."""
+    cands = set()
+    for text, _conf in lines:
+        cleaned = text.replace(",", "").replace(" ", "")
+        for m in RS_RE.finditer(cleaned):
+            n = int(m.group(1))
+            if match_signature(n, sig_table, tolerance=0) or \
+                    match_signature(n, sig_table, tolerance=2):
+                cands.add(n)
+    return cands
+
+
+class RegionOverlay:
+    """캡처 영역(RS/패널/넓은 검색)을 화면에 테두리로 보여주는 창."""
+
+    def __init__(self, root, cfg):
+        import mss
+        import tkinter as tk
+        self.cfg = cfg
+        with mss.mss() as sct:
+            mons = sct.monitors
+            idx = cfg.get("monitor", 1)
+            if idx >= len(mons):
+                idx = 1
+            mon = mons[idx]
+        self.win = tk.Toplevel(root)
+        self.win.overrideredirect(True)
+        self.win.attributes("-topmost", True)
+        self.win.configure(bg=_BG)
+        try:
+            self.win.attributes("-transparentcolor", _BG)
+        except Exception:
+            pass
+        self.win.geometry("{}x{}+{}+{}".format(
+            mon["width"], mon["height"], mon["left"], mon["top"]))
+        cv = tk.Canvas(self.win, bg=_BG, highlightthickness=0)
+        cv.pack(fill="both", expand=True)
+        boxes = []
+        panel = cfg.get("panel_region")
+        if panel:
+            boxes.append((panel, "패널 영역", "#e879f9"))
+        if cfg.get("rs_search", "wide") == "fixed":
+            r = cfg.get("rs_region")
+            if r:
+                boxes.append((r, "RS 영역 (고정)", "#22d3ee"))
+        else:
+            boxes.append((wide_rs_region(cfg, mon),
+                          "RS 넓은 검색 영역", "#facc15"))
+        for r, label, color in boxes:
+            x0, y0 = r["left"], r["top"]
+            x1, y1 = x0 + r["width"], y0 + r["height"]
+            cv.create_rectangle(x0, y0, x1, y1, outline=color, width=3)
+            cv.create_text(x0 + 8, y0 + 6, text=label, fill=color,
+                           anchor="nw", font=("Malgun Gothic", 13, "bold"))
+
+    def destroy(self):
+        try:
+            self.win.destroy()
+        except Exception:
+            pass
 
 
 class OverlayWindow:
@@ -898,6 +978,7 @@ class ControlApp:
             pass
         self.overlay = OverlayWindow(self.root, cfg, family,
                                      minerals=self.state._minerals)
+        self.region_overlay = None
         self._build()
         self._start_hotkeys()
         self.root.after(250, self._tick)
@@ -972,6 +1053,19 @@ class ControlApp:
                       fg_color=_ACCENT, hover_color="#25a89b",
                       text_color="#062622", height=32,
                       font=self.F_H).pack(fill="x", padx=14, pady=(2, 6))
+        ctk.CTkButton(card, text="스캔 영역 표시 (F11)",
+                      command=self.toggle_regions,
+                      fg_color="#23262e", hover_color="#2c313b",
+                      text_color="#e8eaf0", height=30).pack(
+            fill="x", padx=14, pady=(0, 6))
+        ctk.CTkLabel(card, text="RS 읽기 방식", font=self.F_SM,
+                     text_color="#9aa0ab").pack(anchor="w", padx=14)
+        self.rs_mode_seg = ctk.CTkSegmentedButton(
+            card, values=["넓게 찾기", "고정 영역"],
+            command=self._rs_mode_changed)
+        self.rs_mode_seg.set("고정 영역" if self.cfg.get("rs_search") == "fixed"
+                             else "넓게 찾기")
+        self.rs_mode_seg.pack(fill="x", padx=14, pady=(2, 10))
         ctk.CTkButton(card, text="태블릿/웹에서 보기", command=self.open_web,
                       fg_color="#23262e", hover_color="#2c313b",
                       text_color="#e8eaf0", height=30).pack(
@@ -1025,14 +1119,42 @@ class ControlApp:
     def toggle_adjust(self):
         self.overlay.set_adjust(not self.overlay.adjusting)
 
+    def toggle_regions(self):
+        if self.region_overlay is not None:
+            self.region_overlay.destroy()
+            self.region_overlay = None
+        else:
+            try:
+                self.region_overlay = RegionOverlay(self.root, self.cfg)
+            except Exception as e:
+                print(f"[region] 표시 실패: {e}")
+                self.region_overlay = None
+
+    def _rs_mode_changed(self, label):
+        self.cfg["rs_search"] = "fixed" if label == "고정 영역" else "wide"
+        save_config(self.cfg)
+        if self.region_overlay is not None:
+            self.toggle_regions()
+            self.toggle_regions()
+
     def start_calibrate(self):
         if getattr(self, "_calib", None):
             return
+        # 캘리브레이션 중에는 영역 표시 창을 잠시 숨기고, 끝나면 다시 표시
+        had_regions = self.region_overlay is not None
+        if had_regions:
+            self.toggle_regions()
 
         def done(ok):
             self._calib = None
             if ok:
+                # 영역을 직접 지정했으면 그 영역을 쓰는 고정 모드로 전환
+                self.cfg["rs_search"] = "fixed"
+                save_config(self.cfg)
+                self.rs_mode_seg.set("고정 영역")
                 self.overlay._last_render = None
+            if had_regions:
+                self.toggle_regions()
 
         self._calib = Calibrator(self.root, self.cfg, done, self._family)
 
@@ -1056,7 +1178,8 @@ class ControlApp:
             import ctypes
             from ctypes import wintypes
             u32 = ctypes.windll.user32
-            for hid, vk in ((1, 0x77), (2, 0x78), (3, 0x79)):  # F8/F9/F10
+            for hid, vk in ((1, 0x77), (2, 0x78), (3, 0x79),
+                            (4, 0x7A)):  # F8/F9/F10/F11
                 if not u32.RegisterHotKey(None, hid, 0x4000, vk):
                     print(f"[hotkey] F{vk - 0x76} 등록 실패 (다른 프로그램이 사용 중)")
             msg = wintypes.MSG()
@@ -1076,6 +1199,8 @@ class ControlApp:
                     self.toggle_adjust()
                 elif hid == 3:
                     self.start_calibrate()
+                elif hid == 4:
+                    self.toggle_regions()
         except Exception:
             pass
         self.root.after(150, self._drain_hotkeys)
@@ -1123,15 +1248,18 @@ def capture_loop(cfg, state):
     engine = None
     cap = None
     known = list(load_data("minerals.json")["minerals"].keys())
+    sig_table = load_data("signatures.json")
     last_rs = None
     last_panel_sig = None
+    pending_rs = None  # 넓은 검색: 2회 연속 같은 후보일 때만 채택
     while True:
         try:
             rs_region = cfg.get("rs_region")
             panel_region = cfg.get("panel_region")
+            rs_wide = cfg.get("rs_search", "wide") != "fixed"
             if not cfg.get("capture_enabled", True) \
                     or not cfg.get("scan_enabled", True) \
-                    or not (rs_region or panel_region):
+                    or not (rs_region or panel_region or rs_wide):
                 time.sleep(0.4)
                 continue
             if engine is None:
@@ -1140,13 +1268,27 @@ def capture_loop(cfg, state):
             if cap is None or cap.monitor != cfg.get("monitor", 1):
                 cap = Capturer(cfg.get("monitor", 1))
             interval = max(cfg.get("poll_interval_ms", 500), 200) / 1000.0
-            if rs_region:
+            rs = None
+            if rs_wide:
+                # 함선이 바라보는 방향에 따라 RS 숫자 위치가 바뀌므로 넓은
+                # 영역을 읽고 시그니처 표와 맞는 숫자만 채택한다.
+                interval = max(interval, 0.8)
+                region = wide_rs_region(cfg, cap.mon_size())
+                img = cap.grab(region)
+                if img.width > 1600:
+                    img = img.resize((1600, int(img.height * 1600 / img.width)))
+                cands = find_rs_candidates(engine.read_lines(img), sig_table)
+                cand = cands.pop() if len(cands) == 1 else None
+                if cand is not None and cand == pending_rs:
+                    rs = cand
+                pending_rs = cand
+            elif rs_region:
                 text = " ".join(t for t, _ in engine.read_lines(cap.grab(rs_region)))
                 rs = parse_rs(text)
-                if rs and rs != last_rs:
-                    last_rs = rs
-                    print(f"[capture] RS {rs}")
-                    state.update_scan(rs=rs, phase="scan")
+            if rs and rs != last_rs:
+                last_rs = rs
+                print(f"[capture] RS {rs}")
+                state.update_scan(rs=rs, phase="scan")
             if panel_region:
                 lines = engine.read_lines(cap.grab(panel_region))
                 panel = parse_panel([t for t, c in lines if c >= 0.5], known)
