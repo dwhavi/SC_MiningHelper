@@ -127,6 +127,30 @@ def parse_rs(text):
     return int(m.group(1)) if m else None
 
 
+def parse_rs_pos(lines_pos, sig_table):
+    """위치 정보가 있는 OCR 줄에서 시그니처 숫자 하나를 고른다.
+    핀 아이콘 상자의 숫자(12,000 형태)가 시그니처이고, 나침반 숫자
+    (300/320 등)는 표에 맞지 않고 상자보다 아래에 있다."""
+    found = []  # (y, n, matched)
+    for text, _conf, y in lines_pos:
+        # 공백은 유지(토큰 분리), 쉼표만 제거 (12,000 → 12000)
+        cleaned = text.replace(",", "")
+        for mm in RS_RE.finditer(cleaned):
+            n = int(mm.group(1))
+            matched = bool(match_signature(n, sig_table, tolerance=0) or
+                           match_signature(n, sig_table, tolerance=2))
+            found.append((y, n, matched))
+    if not found:
+        return None
+    matched_nums = {n for _y, n, ok in found if ok}
+    if len(matched_nums) == 1:
+        return matched_nums.pop()
+    if matched_nums:
+        return min((f for f in found if f[2]), key=lambda f: f[0])[1]
+    # 표에 맞는 숫자가 없으면 가장 위 줄의 숫자 (핀 상자가 나침반보다 위)
+    return min(found, key=lambda f: f[0])[1]
+
+
 def _canon_name(raw, known):
     raw = raw.strip()
     for k in known:
@@ -229,6 +253,36 @@ def _preprocess(img):
     return ImageOps.autocontrast(g)
 
 
+def _group_rows_pos(result):
+    """_group_rows + 각 줄의 상단 y 좌표 (핀 상자/나침반 구분용)."""
+    tokens = []
+    for box, text, conf in result:
+        tokens.append({
+            "cy": sum(p[1] for p in box) / 4,
+            "top": min(p[1] for p in box),
+            "cx": sum(p[0] for p in box) / 4,
+            "h": max(p[1] for p in box) - min(p[1] for p in box),
+            "text": text, "conf": float(conf)})
+    if not tokens:
+        return []
+    tokens.sort(key=lambda t: t["cy"])
+    med_h = sorted(t["h"] for t in tokens)[len(tokens) // 2]
+    thresh = max(med_h * 0.6, 4)
+    rows = []
+    for t in tokens:
+        if rows and abs(t["cy"] - rows[-1][0]["cy"]) <= thresh:
+            rows[-1].append(t)
+        else:
+            rows.append([t])
+    lines = []
+    for row in rows:
+        row.sort(key=lambda t: t["cx"])
+        lines.append((" ".join(t["text"] for t in row),
+                      sum(t["conf"] for t in row) / len(row),
+                      min(t["top"] for t in row)))
+    return lines
+
+
 def _group_rows(result):
     """OCR 토큰을 같은 줄끼리 묶어 '이름 값%' 한 줄로 재구성."""
     tokens = []
@@ -269,6 +323,11 @@ class RapidOcrBackend:
         result, _ = self._engine(np.array(_preprocess(img)))
         return _group_rows(result) if result else []
 
+    def read_lines_pos(self, img):
+        import numpy as np
+        result, _ = self._engine(np.array(_preprocess(img)))
+        return _group_rows_pos(result) if result else []
+
 
 class WindowsOcrBackend:
     name = "windows"
@@ -303,6 +362,36 @@ class WindowsOcrBackend:
 
         result = asyncio.run(run())
         return [(line.text, 1.0) for line in result.lines]
+
+    def read_lines_pos(self, img):
+        import numpy as np
+        from winsdk.windows.graphics.imaging import (
+            BitmapDecoder, BitmapPixelFormat, SoftwareBitmap)
+        from winsdk.windows.storage.streams import (
+            DataWriter, InMemoryRandomAccessStream)
+
+        arr = np.array(_preprocess(img))
+
+        async def run():
+            stream = InMemoryRandomAccessStream()
+            writer = DataWriter(stream)
+            writer.write_bytes(arr.tobytes())
+            await writer.store_async()
+            stream.seek(0)
+            decoder = await BitmapDecoder.create_async(stream)
+            sb = await decoder.get_software_bitmap_async()
+            sb = SoftwareBitmap.convert(sb, BitmapPixelFormat.GRAY8)
+            return await self._engine.recognize_async(sb)
+
+        result = asyncio.run(run())
+        out = []
+        for line in result.lines:
+            try:
+                y = min(w.bounding_rect.y for w in line.words)
+            except Exception:
+                y = 0
+            out.append((line.text, 1.0, y))
+        return out
 
 
 def create_ocr_engine(preference="auto"):
@@ -621,7 +710,8 @@ def find_rs_candidates(lines, sig_table):
     """OCR 줄들에서 시그니처 표와 맞는 숫자 후보만 골라낸다."""
     cands = set()
     for text, _conf in lines:
-        cleaned = text.replace(",", "").replace(" ", "")
+        # 공백은 유지(토큰 분리): "300 320 340"이 300320으로 합쳐지는 것 방지
+        cleaned = text.replace(",", "")
         for m in RS_RE.finditer(cleaned):
             n = int(m.group(1))
             if match_signature(n, sig_table, tolerance=0) or \
@@ -1283,8 +1373,10 @@ def capture_loop(cfg, state):
                     rs = cand
                 pending_rs = cand
             elif rs_region:
-                text = " ".join(t for t, _ in engine.read_lines(cap.grab(rs_region)))
-                rs = parse_rs(text)
+                # 지정 영역 안에서 핀 상자 숫자만: 시그니처 표 매칭 우선,
+                # 없으면 가장 위 줄 숫자 (나침반 숫자 오인식 방지)
+                lines_pos = engine.read_lines_pos(cap.grab(rs_region))
+                rs = parse_rs_pos(lines_pos, sig_table)
             if rs and rs != last_rs:
                 last_rs = rs
                 print(f"[capture] RS {rs}")
