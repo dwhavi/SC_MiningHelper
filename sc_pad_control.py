@@ -7,9 +7,11 @@ Star Citizen 광물 스캔 결과를 화면 위에 표시하는 로컬 오버레
 """
 import asyncio
 import difflib
+import hmac
 import json
 import os
 import re
+import secrets
 import socket
 import sys
 import threading
@@ -50,6 +52,10 @@ DEFAULTS = {
         "instability_hard": 800,
     },
     "overlay_anchor_v2": True,
+    "pairing_code": "",           # 태블릿 덱 페어링 코드 (비어 있으면 첫 실행 시 생성)
+    "only_when_game_focused": True,  # SC가 최전면 창일 때만 입력 전송
+    "hold_timeout_ms": 5000,      # 홀드 무응답 자동 해제 (stuck 키 방지)
+    "tap_ms": 60,                 # 탭 1회의 키 눌림 길이
 }
 
 
@@ -544,16 +550,10 @@ _KEY_CODES = dict(_KEY_ALIASES)
 _MODIFIERS = {k for k in ("LALT", "RALT", "LSHIFT", "RSHIFT", "LCTRL", "RCTRL",
                           "LCONTROL", "RCONTROL", "CONTROL", "SHIFT", "MENU", "LMETA", "RMETA")}
 
-# 함선 중심 매크로 (tablet-deck 레이아웃 기준)
-_MACROS = {
-    "quantum":    [("hold", "B", 1500)],  # Quantum Jump 홀드
-    "quantum_full": [("hold", "B", 3000)],
-    "exit_seat":  [("hold", "Y", 1200)],
-    "auto_land":  [("hold", "N", 1500)],  # Landing Gear timed 1500
-    "self_destruct": [("hold", "BACKSPACE", 3000)],
-    "land":   [("press", "N"), ("hold", "W", 1000), ("press", "S")],
-    "stow":   [("hold", "LCONTROL", 200), ("press", "S")],
-}
+# 홀드 상태 레지스트리 — down/up 홀드의 자동 해제용 (연결 끊김/무응답 시
+# 눌린 키가 남지 않도록 타임아웃 해제. tablet-deck의 stuck-key 방지와 같은 방식)
+_HOLD_LOCK = threading.Lock()
+_ACTIVE_HOLDS = {}  # SC 키 문자열(대문자) -> 마지막 갱신 monotonic 시각
 
 # SC 키 문자열 파싱: "lalt+n" / "ralt+np_8" / "f5" / "TAB" 등
 _COMBO_SPLIT_RE = None  # 컴파일 지연 (모듈 로드 무거운 작업 방지)
@@ -582,16 +582,8 @@ def _parse_combo(name: str):
     return mods, main
 
 
-def _send_input(action: str, key: str, ms: int = 0, macro: str = ""):
-    """태블릿 -> PC 입력 전송. 반환: (ok, msg).
-
-    type: press(scan만) / hold / tap / timed / macro.
-    tablet-deck 표기(lalt+n, ralt+np_5 등 포함) 지원. press도 조합 키를 지원한다.
-    """
-    if action == "tap":
-        action = "press"
-    if sys.platform != "win32":
-        return (False, "Windows에서만 입력 전송 가능")
+def _emit_vk(vk, flags=0):
+    """SendInput으로 가상키 하나 전송 (Windows 전용)."""
     import ctypes
     from ctypes import wintypes
 
@@ -616,55 +608,119 @@ def _send_input(action: str, key: str, ms: int = 0, macro: str = ""):
     class INPUT2(ctypes.Structure):
         _fields_ = [("type", wintypes.DWORD), ("u", _InputUnion)]
 
-    def _emit(vk, flags=0):
-        import ctypes as _ct
-        inp = INPUT2()
-        inp.type = 1  # INPUT_KEYBOARD
-        inp.u.ki = KEYBDINPUT(vk, 0, flags, 0, None)
-        _ct.windll.user32.SendInput(1, _ct.byref(inp), _ct.sizeof(INPUT2))
+    inp = INPUT2()
+    inp.type = 1  # INPUT_KEYBOARD
+    inp.u.ki = KEYBDINPUT(vk, 0, flags, 0, None)
+    ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT2))
 
-    def _combo_press(key_name):
-        mods, main = _parse_combo(key_name)
-        for m in mods:
-            _emit(m, 0)
-        _emit(main, 0)
-        _emit(main, 2)
-        for m in reversed(mods):
-            _emit(m, 2)
 
-    def _combo_hold(key_name, duration_ms):
-        mods, main = _parse_combo(key_name)
-        for m in mods:
-            _emit(m, 0)
-        _emit(main, 0)
-        time.sleep(duration_ms / 1000.0)
-        _emit(main, 2)
-        for m in reversed(mods):
-            _emit(m, 2)
+def _combo_down(key_name):
+    mods, main = _parse_combo(key_name)
+    for m in mods:
+        _emit_vk(m, 0)
+    _emit_vk(main, 0)
 
+
+def _combo_up(key_name):
+    mods, main = _parse_combo(key_name)
+    _emit_vk(main, 2)
+    for m in reversed(mods):
+        _emit_vk(m, 2)
+
+
+def _combo_press(key_name):
+    mods, main = _parse_combo(key_name)
+    for m in mods:
+        _emit_vk(m, 0)
+    _emit_vk(main, 0)
+    _emit_vk(main, 2)
+    for m in reversed(mods):
+        _emit_vk(m, 2)
+
+
+def _game_focused():
+    """Star Citizen이 최전면 창인지 확인 (Windows 전용, 그 외 OS는 True).
+
+    확인 자체가 실패하면(True) 입력을 막지 않는다.
+    """
+    if sys.platform != "win32":
+        return True
+    import ctypes
+    from ctypes import wintypes
+    try:
+        u32 = ctypes.windll.user32
+        k32 = ctypes.windll.kernel32
+        hwnd = u32.GetForegroundWindow()
+        if not hwnd:
+            return False
+        pid = wintypes.DWORD(0)
+        u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        if not pid.value:
+            return False
+        h = k32.OpenProcess(0x1000, False, pid.value)  # QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        try:
+            buf = ctypes.create_unicode_buffer(260)
+            size = wintypes.DWORD(260)
+            if not k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+                return False
+            return "starcitizen" in (buf.value or "").lower()
+        finally:
+            k32.CloseHandle(h)
+    except Exception:
+        return True
+
+
+def _send_input(action: str, key: str, ms: int = 0):
+    """태블릿 -> PC 입력 전송. 반환: (ok, msg).
+
+    type: press/tap(단일 눌림) | timed/hold(ms만큼 유지) | down/up(누르는 동안)
+    | refresh(down 홀드 갱신). 1버튼=1키만 지원 (매크로 없음).
+    tablet-deck 표기(lalt+n, ralt+np_5 등 포함) 지원.
+    """
+    if action == "tap":
+        action = "press"
+    if action == "hold":
+        action = "timed"
+    if action == "release":
+        action = "up"
+    norm = (key or "").strip().upper()
+    if sys.platform != "win32":
+        return (False, "Windows에서만 입력 전송 가능")
     try:
         if action == "press":
-            if not key:
+            if not norm:
                 return (False, "키가 비어 있음")
-            _combo_press(key)
-            return (True, f"{key} 눌림")
-        elif action in ("hold", "timed"):
-            if not key:
+            _combo_press(norm)
+            return (True, f"{norm} 눌림")
+        elif action == "timed":
+            if not norm:
                 return (False, "키가 비어 있음")
             ms = max(50, min(ms, 10000))
-            _combo_hold(key, ms)
-            return (True, f"{key} {ms}ms 유지")
-        elif action == "macro":
-            seq = _MACROS.get(macro)
-            if seq is None:
-                return (False, f"알 수 없는 매크로: {macro}")
-            for item in seq:
-                if item[0] == "press":
-                    _combo_press(item[1])
-                elif item[0] == "hold":
-                    _combo_hold(item[1], item[2])
-                time.sleep(0.05)
-            return (True, f"매크로 {macro} 실행")
+            _combo_down(norm)
+            time.sleep(ms / 1000.0)
+            _combo_up(norm)
+            return (True, f"{norm} {ms}ms 유지")
+        elif action == "down":
+            if not norm:
+                return (False, "키가 비어 있음")
+            _combo_down(norm)
+            with _HOLD_LOCK:
+                _ACTIVE_HOLDS[norm] = time.monotonic()
+            return (True, f"{norm} 누르는 중")
+        elif action == "refresh":
+            with _HOLD_LOCK:
+                if norm in _ACTIVE_HOLDS:
+                    _ACTIVE_HOLDS[norm] = time.monotonic()
+            return (True, "홀드 갱신")
+        elif action == "up":
+            if not norm:
+                return (False, "키가 비어 있음")
+            with _HOLD_LOCK:
+                _ACTIVE_HOLDS.pop(norm, None)
+            _combo_up(norm)
+            return (True, f"{norm} 뗌")
         else:
             return (False, f"알 수 없는 액션: {action}")
     except ValueError as e:
@@ -672,21 +728,41 @@ def _send_input(action: str, key: str, ms: int = 0, macro: str = ""):
     except Exception as e:
         return (False, f"입력 전송 실패: {e}")
 
+
+def hold_reaper(cfg):
+    """무응답 홀드 자동 해제 스레드 (stuck 키 방지)."""
+    timeout = max(1.0, float(cfg.get("hold_timeout_ms", 5000)) / 1000.0)
+    while True:
+        time.sleep(0.5)
+        now = time.monotonic()
+        with _HOLD_LOCK:
+            expired = [k for k, t in _ACTIVE_HOLDS.items() if now - t > timeout]
+        for k in expired:
+            with _HOLD_LOCK:
+                _ACTIVE_HOLDS.pop(k, None)
+            if sys.platform == "win32":
+                try:
+                    _combo_up(k)
+                    print(f"[deck] 홀드 타임아웃 해제: {k}")
+                except Exception:
+                    pass
+
+
 def create_app(state, cfg):
     """FastAPI 앱 — 태블릿 컨트롤 덱 전용.
 
-    이전 웹 오버레이(overlay.html, /api/state, /api/screenshot, /ws)는 마스터 지시로 제거.
-    태블릿은 결과 표시가 필요 없으며, 입력만 전송한다.
+    태블릿은 입력만 전송하고, 채광 결과는 PC 오버레이에만 표시한다.
+    보안 (tablet-deck 참고): 페어링 코드 + 5회 실패 1분 차단, 게임 포커스 확인,
+    홀드 자동 해제(hold_reaper), release는 항상 통과.
     """
-    from fastapi import FastAPI
+    from fastapi import FastAPI, Request
     from fastapi.responses import HTMLResponse, JSONResponse
     from pydantic import BaseModel
 
     class InputRequest(BaseModel):
-        type: str                      # press | hold | macro
-        key: str = ""                  # press/hold용 키 이름 (예: "B", "LCONTROL", "UP")
-        ms: int = 0                    # hold용 유지 시간 (ms)
-        name: str = ""                 # macro용 이름 (예: "land", "scan")
+        type: str                      # press/tap | timed/hold | down/up/refresh
+        key: str = ""                  # SC 키 표기 (예: "b", "lalt+n", "np_5")
+        ms: int = 0                    # timed용 유지 시간 (ms)
 
     class TestInput(BaseModel):
         rs: int | None = None
@@ -696,24 +772,75 @@ def create_app(state, cfg):
         mass: float | None = None
 
     app = FastAPI(title="SC_PadControl — Tablet Control Deck", docs_url=None, redoc_url=None)
+    pair_fails = {}
+    pair_block = {}
 
     def read_html(name):
         with open(os.path.join(BUNDLE_DIR, name), encoding="utf-8") as f:
             return f.read()
+
+    def _check_pair(request: Request):
+        """페어링 코드 확인. 통과 시 None, 실패 시 JSONResponse."""
+        ip = request.client.host if request.client else "?"
+        now = time.monotonic()
+        if pair_block.get(ip, 0) > now:
+            return JSONResponse({"ok": False, "msg": "잠시 차단됨 (1분 후 재시도)"},
+                                status_code=429)
+        want = str(cfg.get("pairing_code") or "")
+        got = request.headers.get("x-pairing-code", "")
+        if not want or hmac.compare_digest(got, want):
+            pair_fails.pop(ip, None)
+            return None
+        rec = [t for t in pair_fails.get(ip, []) if now - t < 60]
+        rec.append(now)
+        pair_fails[ip] = rec
+        if len(rec) >= 5:
+            pair_block[ip] = now + 60
+            pair_fails[ip] = []
+            return JSONResponse({"ok": False, "msg": "코드 5회 오류 - 1분 차단"},
+                                status_code=429)
+        return JSONResponse({"ok": False, "msg": "페어링 코드가 맞지 않음"},
+                            status_code=401)
 
     @app.get("/", response_class=HTMLResponse)
     def index():
         # 태블릿 컨트롤 덱 메인 페이지
         return read_html("control_deck.html")
 
+    @app.get("/api/layout")
+    def deck_layout():
+        """덱 레이아웃 JSON. exe 옆 deck_layout.json이 있으면 그것을 우선."""
+        user_path = os.path.join(EXE_DIR, "deck_layout.json")
+        p = user_path if os.path.exists(user_path) else _data_path("deck_layout.json")
+        if not p:
+            return JSONResponse({"pages": []})
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            return JSONResponse({"pages": [], "error": str(e)}, status_code=500)
+
     @app.post("/api/input")
-    def tablet_input(body: InputRequest):
-        """태블릿 → PC 입력. type: press/hold/macro."""
-        ok, msg = _send_input(body.type, body.key, body.ms, body.name)
+    def tablet_input(body: InputRequest, request: Request):
+        """태블릿 → PC 입력. release(up)는 항상 통과 (stuck 키 방지)."""
+        deny = _check_pair(request)
+        if deny is not None:
+            return deny
+        action = body.type
+        if action not in ("up", "release", "refresh") \
+                and cfg.get("only_when_game_focused", True) \
+                and not _game_focused():
+            return JSONResponse(
+                {"ok": False, "error": "game_not_focused",
+                 "msg": "게임 창이 앞에 있을 때만 전송됨"}, status_code=409)
+        ok, msg = _send_input(action, body.key, body.ms)
         return JSONResponse({"ok": ok, "msg": msg}, status_code=200 if ok else 400)
 
     @app.post("/api/test")
-    def test_input(body: TestInput):
+    def test_input(body: TestInput, request: Request):
+        deny = _check_pair(request)
+        if deny is not None:
+            return deny
         panel = None
         if body.minerals is not None or body.resistance_pct is not None:
             panel = {"minerals": body.minerals or [], "inert_pct": None,
@@ -723,7 +850,10 @@ def create_app(state, cfg):
         return {"ok": True}
 
     @app.post("/api/clear")
-    def clear():
+    def clear(request: Request):
+        deny = _check_pair(request)
+        if deny is not None:
+            return deny
         state.clear()
         return {"ok": True}
 
@@ -1326,7 +1456,20 @@ class ControlApp:
         self.rs_mode_seg.set("고정 영역" if self.cfg.get("rs_search") == "fixed"
                              else "넓게 찾기")
         self.rs_mode_seg.pack(fill="x", padx=14, pady=(2, 10))
-        ctk.CTkButton(card, text="태블릿/웹에서 보기", command=self.open_web,
+        ctk.CTkLabel(card, text="태블릿 덱", font=self.F_SM,
+                     text_color="#7e93a6").pack(anchor="w", padx=14)
+        pair_row = ctk.CTkFrame(card, fg_color="transparent")
+        pair_row.pack(fill="x", padx=14, pady=(2, 4))
+        ctk.CTkLabel(pair_row, text="페어링 코드", font=self.F_SM,
+                     text_color="#7e93a6").pack(side="left")
+        ctk.CTkLabel(pair_row, text=str(self.cfg.get("pairing_code") or "-"),
+                     font=self.F_H, text_color="#46c8e6").pack(side="right")
+        ctk.CTkButton(card, text="태블릿 덱 열기", command=self.open_web,
+                      fg_color="#14202c", hover_color="#1a2c3c",
+                      text_color="#dfe9f2", height=30).pack(
+            fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(card, text="덱 설정 파일 열기",
+                      command=self.open_deck_settings,
                       fg_color="#14202c", hover_color="#1a2c3c",
                       text_color="#dfe9f2", height=30).pack(
             fill="x", padx=14, pady=(0, 4))
@@ -1421,6 +1564,25 @@ class ControlApp:
     def open_web(self):
         import webbrowser
         webbrowser.open("http://localhost:{}".format(self.cfg.get("port", 8377)))
+
+    def open_deck_settings(self):
+        """exe 옆 deck_layout.json을 연다. 없으면 내장 기본값을 복사해 둔다."""
+        p = os.path.join(EXE_DIR, "deck_layout.json")
+        if not os.path.exists(p):
+            src = _data_path("deck_layout.json")
+            try:
+                if src:
+                    import shutil
+                    shutil.copyfile(src, p)
+            except OSError:
+                pass
+        try:
+            if sys.platform == "win32":
+                os.startfile(p)  # type: ignore[attr-defined]
+            else:
+                print(f"[deck] 설정 파일: {p}")
+        except OSError as e:
+            print(f"[deck] 설정 파일 열기 실패: {e}")
 
     def quit(self):
         save_config(self.cfg)
@@ -1617,6 +1779,13 @@ def _setup_windowed_logging():
 def main():
     _setup_windowed_logging()
     cfg = load_config()
+    if not cfg.get("pairing_code"):
+        cfg["pairing_code"] = f"{secrets.randbelow(1000000):06d}"
+        try:
+            save_config(cfg)
+        except OSError:
+            pass
+    threading.Thread(target=hold_reaper, args=(cfg,), daemon=True).start()
     state = ScanState(load_data("signatures.json"),
                       load_data("minerals.json")["minerals"],
                       load_data("equipment.json"),
@@ -1631,6 +1800,7 @@ def main():
     print(" SC 패드 컨트롤 시작")
     print(f"  이 PC에서:        http://localhost:{port}")
     print(f"  태블릿/같은Wi-Fi: http://{lan_ip()}:{port}")
+    print(f"  페어링 코드:      {cfg.get('pairing_code')}")
     print("  종료: 제어 창의 종료 버튼 또는 이 창 닫기")
     print("=" * 56)
 
