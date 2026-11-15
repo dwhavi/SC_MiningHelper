@@ -82,6 +82,22 @@ class DeckTests(unittest.TestCase):
     def test_wheel_rejects_hold(self):
         with patch.object(m.sys,'platform','win32'),patch.object(m,'_emit_vk') as emit:
             self.assertFalse(m._send_input('down','mwheel_up')[0]);emit.assert_not_called()
+    def test_failed_main_key_releases_modifier(self):
+        calls=[]
+        def emit(vk, flags=0):
+            calls.append((vk,flags))
+            if vk == 4097 and flags == 0:raise OSError("rejected")
+        with patch.object(m.sys,'platform','win32'),patch.object(m,'_emit_vk',side_effect=emit):
+            self.assertFalse(m._send_input('press','lalt+mouse1')[0])
+            self.assertEqual(calls[-1],(164,2))
+    def test_release_attempts_all_keys(self):
+        calls=[]
+        def emit(vk,flags=0):
+            calls.append((vk,flags))
+            if vk==4097:raise OSError("rejected")
+        with patch.object(m,'_emit_vk',side_effect=emit):
+            with self.assertRaises(OSError):m._combo_up('lalt+mouse1')
+            self.assertEqual(calls[-1],(164,2))
     def test_pairing_does_not_clear_results(self):
         self.state.update_scan(rs=6340,phase='test')
         old=self.state.get()

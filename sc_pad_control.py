@@ -633,27 +633,38 @@ def _emit_vk(vk, flags=0):
 
 def _combo_down(key_name):
     mods, main = _parse_combo(key_name)
-    for m in mods:
-        _emit_vk(m, 0)
-    _emit_vk(main, 0)
+    pressed = []
+    try:
+        for vk in mods + [main]:
+            _emit_vk(vk, 0)
+            pressed.append(vk)
+    except Exception:
+        for vk in reversed(pressed):
+            try:
+                _emit_vk(vk, 2)
+            except Exception:
+                pass
+        raise
 
 
 def _combo_up(key_name):
     mods, main = _parse_combo(key_name)
-    _emit_vk(main, 2)
-    for m in reversed(mods):
-        _emit_vk(m, 2)
+    first_error = None
+    for vk in [main] + list(reversed(mods)):
+        try:
+            _emit_vk(vk, 2)
+        except Exception as exc:
+            first_error = first_error or exc
+    if first_error is not None:
+        raise first_error
 
 
 def _combo_press(key_name):
-    mods, main = _parse_combo(key_name)
-    for m in mods:
-        _emit_vk(m, 0)
-    _emit_vk(main, 0)
-    time.sleep(0.06)
-    _emit_vk(main, 2)
-    for m in reversed(mods):
-        _emit_vk(m, 2)
+    _combo_down(key_name)
+    try:
+        time.sleep(0.06)
+    finally:
+        _combo_up(key_name)
 
 
 def _game_focused():
@@ -806,9 +817,15 @@ def _send_input(action: str, key: str, ms: int = 0):
             if not norm:
                 return (False, "키가 비어 있음")
             ms = max(50, min(ms, 10000))
-            _combo_down(norm)
-            time.sleep(ms / 1000.0)
-            _combo_up(norm)
+            with _HOLD_LOCK:
+                _combo_down(norm)
+                _ACTIVE_HOLDS[norm] = time.monotonic()
+            try:
+                time.sleep(ms / 1000.0)
+            finally:
+                with _HOLD_LOCK:
+                    _ACTIVE_HOLDS.pop(norm, None)
+                    _combo_up(norm)
             return (True, f"{norm} {ms}ms 유지")
         elif action == "down":
             if not norm:
@@ -854,13 +871,18 @@ def hold_reaper(cfg):
             expired = [k for k, t in _ACTIVE_HOLDS.items() if now - t > timeout or lost_focus]
         for k in expired:
             with _HOLD_LOCK:
+                if k not in _ACTIVE_HOLDS:
+                    continue
+                # Recheck refreshed timestamps under the lock before releasing.
+                if not lost_focus and time.monotonic() - _ACTIVE_HOLDS[k] <= timeout:
+                    continue
                 _ACTIVE_HOLDS.pop(k, None)
-            if sys.platform == "win32":
-                try:
-                    _combo_up(k)
-                    print(f"[deck] 홀드 타임아웃 해제: {k}")
-                except Exception:
-                    pass
+                if sys.platform == "win32":
+                    try:
+                        _combo_up(k)
+                        print(f"[deck] 안전 해제: {k}")
+                    except Exception:
+                        pass
 
 
 def create_app(state, cfg):
