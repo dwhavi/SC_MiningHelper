@@ -117,7 +117,7 @@
           "action": "lights_controller.v_lights"
         },
         {
-          "label": "퀀텀 모드",
+          "label": "마스터 모드",
           "keys": "b",
           "mode": "hold",
           "action": "spaceship_movement.v_master_mode_cycle_long"

@@ -1264,7 +1264,7 @@ class OverlayWindow:
         self.adjusting = on
         if on:
             self.win.configure(bg="#0b1118")
-            self.lines[0].configure(text="위치 조정: 드래그로 이동, F9로 저장",
+            self.lines[0].configure(text="위치 조정: 드래그로 이동, Ctrl+Alt+F9로 저장",
                                     fg=_ORANGE, font=self.FONT)
             for lbl in self.lines[1:]:
                 lbl.configure(text="")
@@ -1644,7 +1644,8 @@ class ControlApp:
                                      text_color="#5a6b7a")
         self.am_status.pack(anchor="w", padx=14, pady=(0, 2))
         self.srv_label = ctk.CTkLabel(card, text="", font=self.F_SM,
-                                      text_color="#5a6b7a")
+                                      text_color="#7e93a6", wraplength=270,
+                                      justify="left", anchor="w")
         self.srv_label.pack(anchor="w", padx=14, pady=(0, 10))
 
         # ---- 오류 배너
@@ -1838,10 +1839,10 @@ class ControlApp:
         elif region_ok:
             txt = f"대기 중 ({phase})"
         else:
-            txt = "캡처 영역 미설정 — F10으로 지정"
+            txt = "캡처 영역 미설정 — Ctrl+Alt+F10으로 지정"
         self.last_scan.configure(text=txt)
         self.srv_label.configure(
-            text=f"http://localhost:{port}  ·  같은 Wi-Fi: http://{lan_ip()}:{port}")
+            text=f"이 PC: http://localhost:{port}\n같은 Wi-Fi: http://{lan_ip()}:{port}")
         if LAST_ERROR:
             self.err_banner.configure(text=f"최근 오류: {LAST_ERROR}")
             self.err_banner.pack(padx=14, pady=(10, 0), fill="x",

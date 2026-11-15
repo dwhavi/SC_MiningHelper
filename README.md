@@ -84,6 +84,8 @@ pip install -r requirements.txt pyinstaller httpx
 python -m unittest -v test_deck.py
 ```
 
+웹 UI 검증은 개발 환경에서 `pip install playwright`, `playwright install chromium` 후 `python tests/frontend_smoke.py`로 실행할 수 있습니다.
+
 GitHub Actions가 Windows에서 단일 exe를 만들고 실제 exe HTTP 스모크 테스트를 거친 뒤 Release에 올립니다. 회귀 테스트는 위 명령으로 별도 실행합니다. 빌드 옵션은 `.github/workflows/build.yml`이 기준입니다. 로컬 수동 빌드에도 `--noconsole`과 `deck_layout.json` 번들을 포함해야 합니다.
 
 참고 자료: [nodieCode/tablet-deck](https://github.com/nodieCode/tablet-deck) 설계 참고, [Boxxy-Binder 바인딩 자료](https://github.com/BoxximusPrime/Boxxy-Binder/blob/55d681fde171be05a67a1def65265018fbbcde7b/AllBinds.xml#L281), [SCJMapper 기본 프로필](https://github.com/SCToolsfactory/SCJMapper-V2/blob/42f61bfaceae4e5baf4b9c1aadcc99e43608da99/SC/defaultProfile.xml#L625). 외부 코드는 복사하지 않았습니다.
