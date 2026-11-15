@@ -1,4 +1,4 @@
-# SC Mining Helper (SC 광물 오버레이)
+# SC_PadControl (SC 패드 컨트롤)
 
 Star Citizen 광물 스캔 결과를 게임 화면 위에 직접 띄워 주는 프로그램입니다.
 화면 캡처 + OCR만 사용하며 게임 메모리 읽기, 인젝션, 후킹이 없습니다.
@@ -16,11 +16,11 @@ Star Citizen 광물 스캔 결과를 게임 화면 위에 직접 띄워 주는 �
 
 ## 다운로드와 실행 (Python 설치 불필요)
 
-1. [Releases](../../releases)에서 최신 `SCMiningHelper.exe` 다운로드
+1. [Releases](../../releases)에서 최신 `SC_PadControl.exe` 다운로드
 2. 아무 폴더에 두고 더블클릭 (처음 실행은 준비에 10~20초 걸릴 수 있습니다. SmartScreen 경고가 뜨면 "추가 정보" → "실행")
 3. 검은 cmd 창 없이 제어 창이 바로 뜹니다. 게임을 보더리스 모드로 실행하고 스캔하세요.
 
-제어 창에서 스캔 ON/OFF, 오버레이 표시, 투명도, 위치 조정, 화면 영역 지정, 종료를 할 수 있습니다. 오류가 나면 제어 창 배너에 표시되고, 자세한 로그는 exe 옆 `scm_helper.log`에 기록됩니다.
+제어 창에서 스캔 ON/OFF, 오버레이 표시, 투명도, 위치 조정, 화면 영역 지정, 종료를 할 수 있습니다. 오류가 나면 제어 창 배너에 표시되고, 자세한 로그는 exe 옆 `sc_pad_control.log`에 기록됩니다.
 
 동작 확인 (게임 없이 가능): 태블릿/브라우저에서 http://PC_IP:8377 접속 → 입력 버튼 동작 확인. RS 테스트는 브라우저에서 /api/test 로 가능한데, PC 오버레이는 tkinter 창에 표시됨.
 
@@ -47,9 +47,9 @@ GitHub Actions (windows-latest)가 PyInstaller로 단일 exe를 빌드하고 Rel
 
 ```
 pip install -r requirements.txt pyinstaller
-pyinstaller --noconfirm --onefile --name SCMiningHelper ^
+pyinstaller --noconfirm --onefile --name SC_PadControl ^
   --collect-all rapidocr_onnxruntime --collect-all onnxruntime ^
   --add-data "signatures.json;." --add-data "minerals.json;." ^
   --add-data "equipment.json;." --add-data "config.json;." ^
-  --add-data "control_deck.html;." scm_helper.py
+  --add-data "control_deck.html;." sc_pad_control.py
 ```

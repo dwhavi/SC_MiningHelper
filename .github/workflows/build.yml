@@ -23,30 +23,30 @@ jobs:
 
       - name: Build one-file exe
         run: |
-          pyinstaller --noconfirm --onefile --noconsole --name SCMiningHelper `
+          pyinstaller --noconfirm --onefile --noconsole --name SC_PadControl `
             --collect-all rapidocr_onnxruntime --collect-all onnxruntime `
             --collect-all customtkinter `
             --add-data "signatures.json;." --add-data "minerals.json;." `
             --add-data "equipment.json;." --add-data "config.json;." `
-            --add-data "control_deck.html;." scm_helper.py
+            --add-data "control_deck.html;." sc_pad_control.py
 
       - name: Smoke test the exe on Windows
         shell: pwsh
         run: |
-          Start-Process .\dist\SCMiningHelper.exe
+          Start-Process .\dist\SC_PadControl.exe
           Start-Sleep -Seconds 30
           try {
             $r = Invoke-WebRequest http://localhost:8377/ -UseBasicParsing
             if ($r.StatusCode -ne 200) { throw "control deck page returned $($r.StatusCode)" }
             Write-Host "smoke OK, control deck HTTP $($r.StatusCode)"
           } finally {
-            Get-Process SCMiningHelper -ErrorAction SilentlyContinue | Stop-Process -Force
+            Get-Process SC_PadControl -ErrorAction SilentlyContinue | Stop-Process -Force
           }
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v0.${{ github.run_number }}
-          name: SCMiningHelper v0.${{ github.run_number }}
-          files: dist/SCMiningHelper.exe
+          name: SC_PadControl v0.${{ github.run_number }}
+          files: dist/SC_PadControl.exe
           generate_release_notes: true

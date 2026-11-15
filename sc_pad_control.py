@@ -1,9 +1,9 @@
-"""SC 광물 오버레이 (SC Mining Helper) - 단일 파일 버전.
+"""SC 패드 컨트롤 (SC_PadControl) - 단일 파일 버전.
 
 Star Citizen 광물 스캔 결과를 화면 위에 표시하는 로컬 오버레이.
 화면 캡처 + OCR만 사용 (인젝션/메모리 읽기 없음, EAC 안전 범위).
 
-실행: python scm_helper.py  (또는 빌드된 SCMiningHelper.exe)
+실행: python sc_pad_control.py  (또는 빌드된 SC_PadControl.exe)
 """
 import asyncio
 import difflib
@@ -639,7 +639,7 @@ def create_app(state, cfg):
         instability: float | None = None
         mass: float | None = None
 
-    app = FastAPI(title="SC Mining Helper — Tablet Control Deck", docs_url=None, redoc_url=None)
+    app = FastAPI(title="SC_PadControl — Tablet Control Deck", docs_url=None, redoc_url=None)
 
     def read_html(name):
         with open(os.path.join(BUNDLE_DIR, name), encoding="utf-8") as f:
@@ -1158,7 +1158,7 @@ class ControlApp:
         self.hotkey_q = queue.Queue()
         ctk.set_appearance_mode("dark")
         self.root = ctk.CTk()
-        self.root.title("SC Mining Helper")
+        self.root.title("SC_PadControl")
         self.root.geometry("360x640+60+60")
         self.root.resizable(False, False)
         self.root.configure(fg_color="#0a0f16")
@@ -1202,7 +1202,7 @@ class ControlApp:
         header.pack(fill="x", padx=16, pady=(14, 2))
         if self._icon_img:
             ctk.CTkLabel(header, text="", image=self._icon_img).pack(side="left")
-        ctk.CTkLabel(header, text="  SC 광물 오버레이",
+        ctk.CTkLabel(header, text="  SC 패드 컨트롤",
                      font=self.F_TITLE, text_color="#eef4fa").pack(side="left")
         self.pill = ctk.CTkLabel(header, text="  스캔 중  ", font=self.F_SM,
                                  fg_color="#0d2833", text_color=_ACCENT,
@@ -1527,7 +1527,7 @@ def _setup_windowed_logging():
     import traceback
     if getattr(sys, "frozen", False):
         try:
-            log = open(os.path.join(EXE_DIR, "scm_helper.log"), "a",
+            log = open(os.path.join(EXE_DIR, "sc_pad_control.log"), "a",
                        encoding="utf-8", buffering=1)
             if sys.stdout is None or not hasattr(sys.stdout, "write"):
                 sys.stdout = log
@@ -1572,7 +1572,7 @@ def main():
         print("[안내] 캡처 영역 미설정: 제어 창의 '화면 영역 지정'(F10) 또는 "
               f"제어 창의 '화면 영역 지정'(F10)으로 지정하세요.")
     print("=" * 56)
-    print(" SC 광물 오버레이 시작")
+    print(" SC 패드 컨트롤 시작")
     print(f"  이 PC에서:        http://localhost:{port}")
     print(f"  태블릿/같은Wi-Fi: http://{lan_ip()}:{port}")
     print("  종료: 제어 창의 종료 버튼 또는 이 창 닫기")
