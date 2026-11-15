@@ -21,5 +21,9 @@
     "resist_hard_pct": 55.0,
     "instability_hard": 800
   },
-  "overlay_anchor_v2": true
+  "overlay_anchor_v2": true,
+  "pairing_code": "",
+  "only_when_game_focused": true,
+  "hold_timeout_ms": 5000,
+  "tap_ms": 60
 }
