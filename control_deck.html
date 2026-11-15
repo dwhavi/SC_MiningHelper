@@ -1,121 +1,238 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
-<title>SC 태블릿 컨트롤 덱</title>
+<title>SC 컨트롤 덱</title>
 <style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-  body {
-    background: #0a0e14; color: #e8eef5;
-    font-family: "Malgun Gothic", "Segoe UI", sans-serif;
-    padding: 10px; min-height: 100vh; touch-action: manipulation;
+  :root { --bg:#0a0f16; --panel:#0d141d; --line:#1a222c; --fg:#eef4fa;
+          --dim:#7e93a6; --accent:#46c8e6; --accent-dim:#164b5e; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font-family:'Segoe UI','Malgun Gothic',sans-serif;
+         touch-action:manipulation; user-select:none; -webkit-user-select:none; }
+  header { display:flex; align-items:center; justify-content:space-between;
+           padding:10px 14px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:16px; margin:0; letter-spacing:1px; color:var(--accent); }
+  #focusBadge { font-size:12px; color:var(--dim); }
+  #focusBadge.off { color:#ff5f5f; }
+  #tabs { display:flex; gap:6px; padding:8px 12px 0; }
+  .tab { flex:1; text-align:center; padding:9px 0; font-size:14px; color:var(--dim);
+         background:var(--panel); border:1px solid var(--line); border-radius:8px;
+         cursor:pointer; }
+  .tab.on { color:#03222b; background:var(--accent); border-color:var(--accent);
+            font-weight:600; }
+  #grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr));
+          gap:8px; padding:12px; }
+  .btn { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+         min-height:64px; display:flex; flex-direction:column; align-items:center;
+         justify-content:center; gap:3px; padding:8px 4px; cursor:pointer;
+         text-align:center; }
+  .btn .lbl { font-size:14px; line-height:1.25; word-break:keep-all; }
+  .btn .mode { font-size:10px; color:var(--dim); }
+  .btn.active { background:var(--accent-dim); border-color:var(--accent);
+                color:var(--accent); }
+  .btn.gray { min-height:40px; font-size:13px; color:var(--dim); flex:1; }
+  .row { display:flex; gap:8px; padding:0 12px 8px; }
+  #log { padding:0 12px 12px; font-size:11px; color:var(--dim);
+         max-height:110px; overflow-y:auto; }
+  #log div { padding:2px 0; border-bottom:1px solid #111a24; }
+  #log .ng { color:#ff5f5f; }
+  #pairOverlay { position:fixed; inset:0; background:rgba(4,8,12,.96);
+                 display:none; flex-direction:column; align-items:center;
+                 justify-content:center; gap:14px; z-index:10; padding:24px; }
+  #pairOverlay.show { display:flex; }
+  #pairOverlay h2 { font-size:17px; color:var(--accent); margin:0; }
+  #pairOverlay p { font-size:13px; color:var(--dim); text-align:center; margin:0; }
+  #pairCode { font-size:28px; letter-spacing:8px; text-align:center; width:220px;
+              padding:10px; background:var(--panel); color:var(--fg);
+              border:1px solid var(--accent-dim); border-radius:10px; }
+  #pairGo { padding:12px 40px; font-size:15px; background:var(--accent);
+            color:#03222b; border:none; border-radius:10px; font-weight:600; }
+  #pairMsg { font-size:12px; color:#ff5f5f; min-height:16px; }
+  @media (max-width:520px) {
+    #grid { grid-template-columns:repeat(auto-fill,minmax(78px,1fr)); gap:6px; }
+    .btn { min-height:56px; } .btn .lbl { font-size:12px; }
   }
-  h1 { font-size: 16px; margin: 4px 0 10px; display: flex; justify-content: space-between; align-items: center; }
-  h1 .dot { width: 10px; height: 10px; border-radius: 50%; background: #41d99a; }
-  h1 .dot.bad { background: #da3633; }
-  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-  .btn {
-    border: 1px solid #2a3542; border-radius: 10px; background: #161f2a;
-    color: #e8eef5; font-size: 15px; font-weight: 600;
-    padding: 18px 6px; text-align: center; cursor: pointer;
-    min-height: 62px; touch-action: manipulation; user-select: none;
-  }
-  .btn:active { background: #1f6feb; border-color: #1f6feb; }
-  .btn.big { grid-column: span 3; background: #1a3245; border-color: #2ea9c6; font-size: 18px; }
-  .btn.gray { background: #232c38; color: #aab4c0; }
-  h2 { font-size: 12px; color: #6c7885; margin: 14px 0 6px; letter-spacing: 1px; }
-  #log { margin-top: 12px; font-size: 12px; color: #6c7885; max-height: 120px; overflow-y: auto;
-         border-top: 1px solid #2a3542; padding-top: 8px; line-height: 1.5; }
-  #log .ok { color: #7ee2a0; }
-  #log .err { color: #ff8f8a; }
-  .row { display: flex; gap: 8px; margin-top: 8px; }
-  .row .btn { flex: 1; }
-  .btn.danger { background: #3a1a1a; border-color: #da3633; color: #ff8f8a; }
 </style>
 </head>
 <body>
-<h1>SC 컨트롤 덱 <span class="dot" id="dot"></span></h1>
-
-<h2>채굴 조작</h2>
-<div class="grid">
-  <div class="btn" data-k="B">B<br><small>채굴 켜기</small></div>
-  <div class="btn" data-k="V">V<br><small>미네랄 샷</small></div>
-  <div class="btn" data-k="N">N<br><small>자석 보호막</small></div>
-  <div class="btn" data-k="C">C<br><small>커터</small></div>
-  <div class="btn" data-k="LCONTROL">Ctrl<br><small>홀드 400ms</small></div>
-  <div class="btn" data-k="TAB">TAB<br><small>파티/메뉴</small></div>
-</div>
-
-<h2>이동</h2>
-<div class="grid">
-  <div class="btn" data-k="W">W</div>
-  <div class="btn" data-k="S">S</div>
-  <div class="btn" data-k="A">A</div>
-  <div class="btn" data-k="D">D</div>
-  <div class="btn" id="btnHoldW">W<br><small>홀드 3초</small></div>
-  <div class="btn" id="btnHoldS">S<br><small>홀드 3초</small></div>
-</div>
-
-<h2>매크로</h2>
-<div class="grid">
-  <div class="btn big" data-macro="land">착륙 시퀀스</div>
-  <div class="btn big" data-macro="scan">미네랄 샷 시퀀스</div>
-  <div class="btn big" data-macro="abort">채굴 중단</div>
-</div>
-
-<h2>기타</h2>
-<div class="grid">
-  <div class="btn" data-k="F">F<br><small>석션/도킹</small></div>
-  <div class="btn" data-k="G">G<br><small>선내/장비</small></div>
-  <div class="btn" data-k="M">M<br><small>스타맵</small></div>
-  <div class="btn" data-k="SPACE">SPACE</div>
-  <div class="btn" data-k="ENTER">ENTER</div>
-  <div class="btn danger" data-k="ESC">ESC</div>
-</div>
-
+<header>
+  <h1>SC 컨트롤 덱</h1>
+  <span id="focusBadge"></span>
+</header>
+<nav id="tabs"></nav>
+<main id="grid"></main>
 <div class="row">
   <div class="btn gray" id="btnTest">테스트 모드</div>
   <div class="btn gray" id="btnClear">지우기</div>
 </div>
-
 <div id="log"></div>
 
+<div id="pairOverlay">
+  <h2>PC 페어링</h2>
+  <p>제어 창에 표시된 6자리 페어링 코드를 입력하세요.<br>코드는 이 기기에만 저장됩니다.</p>
+  <input id="pairCode" inputmode="numeric" maxlength="6" autocomplete="off">
+  <div id="pairMsg"></div>
+  <button id="pairGo">연결</button>
+</div>
+
 <script>
-const logEl = document.getElementById('log'), dot = document.getElementById('dot');
+const FALLBACK_LAYOUT = {   "name": "SC_PadControl 덱",   "version": 2,   "tap_ms": 60,   "notes": "SC 4.x 기본 키 기준 (nodieCode/tablet-deck 레이아웃 참고). 인게임에서 키를 바꿨으면 여기서도 같은 키로 고치세요. mode: tap=짧게 누름, hold=누르는 동안, timed=ms만큼 유지.",   "pages": [     {       "id": "mining",       "name": "채굴",       "buttons": [         {"label": "채굴 모드", "keys": "ralt+m", "mode": "tap"},         {"label": "레이저 발사", "keys": "rctrl+f", "mode": "tap"},         {"label": "파쇄/추출", "keys": "rctrl+t", "mode": "tap"},         {"label": "출력 +", "keys": "rctrl+w", "mode": "hold"},         {"label": "출력 −", "keys": "rctrl+s", "mode": "hold"},         {"label": "모듈 1", "keys": "lalt+1", "mode": "tap"},         {"label": "모듈 2", "keys": "lalt+2", "mode": "tap"},         {"label": "모듈 3", "keys": "lalt+3", "mode": "tap"},         {"label": "스캔 핑", "keys": "v", "mode": "tap"},         {"label": "스캔 모드", "keys": "ralt+v", "mode": "tap"}       ]     },     {       "id": "ship",       "name": "선박",       "buttons": [         {"label": "비행 준비", "keys": "r", "mode": "tap"},         {"label": "전원", "keys": "u", "mode": "tap"},         {"label": "랜딩기어", "keys": "n", "mode": "tap"},         {"label": "착륙 요청", "keys": "lalt+n", "mode": "tap"},         {"label": "VTOL", "keys": "k", "mode": "tap"},         {"label": "전등", "keys": "l", "mode": "tap"},         {"label": "퀀텀 점프", "keys": "b", "mode": "hold"},         {"label": "좌석 내리기", "keys": "y", "mode": "timed", "ms": 1200},         {"label": "무기 출력", "keys": "f5", "mode": "tap"},         {"label": "엔진 출력", "keys": "f6", "mode": "tap"},         {"label": "실드 출력", "keys": "f7", "mode": "tap"},         {"label": "출력 초기화", "keys": "f8", "mode": "tap"}       ]     },     {       "id": "general",       "name": "일반",       "buttons": [         {"label": "상호작용", "keys": "f", "mode": "tap"},         {"label": "모비글라스", "keys": "f1", "mode": "tap"},         {"label": "스타맵", "keys": "f2", "mode": "tap"},         {"label": "인벤토리", "keys": "i", "mode": "tap"},         {"label": "연락처", "keys": "f11", "mode": "tap"},         {"label": "3인칭", "keys": "f4", "mode": "tap"},         {"label": "문 열기", "keys": "lalt+o", "mode": "tap"},         {"label": "문 토글", "keys": "np_period", "mode": "tap"},         {"label": "채팅", "keys": "enter", "mode": "tap"},         {"label": "ESC", "keys": "esc", "mode": "tap"}       ]     }   ] };  // 내장 기본값 (/api/layout 실패 대비)
+const S = { code: localStorage.getItem('sc_pair') || '', layout: null,
+            page: 0, holds: {} };
+
 function log(msg, ok) {
+  const el = document.getElementById('log');
   const d = document.createElement('div');
-  d.className = ok ? 'ok' : 'err';
-  d.textContent = new Date().toLocaleTimeString('ko-KR') + '  ' + msg;
-  logEl.prepend(d);
-  while (logEl.children.length > 20) logEl.lastChild.remove();
-  dot.className = 'dot' + (ok ? '' : ' bad');
+  if (ok === false) d.className = 'ng';
+  d.textContent = new Date().toLocaleTimeString('ko-KR',{hour12:false}) + '  ' + msg;
+  el.prepend(d);
+  while (el.children.length > 20) el.lastChild.remove();
 }
-async function send(body) {
+
+function showPair(msg) {
+  document.getElementById('pairOverlay').classList.add('show');
+  document.getElementById('pairMsg').textContent = msg || '';
+  setTimeout(() => document.getElementById('pairCode').focus(), 50);
+}
+function hidePair() { document.getElementById('pairOverlay').classList.remove('show'); }
+
+document.getElementById('pairGo').addEventListener('click', async () => {
+  const v = document.getElementById('pairCode').value.trim();
+  if (!v) return;
+  S.code = v;
+  const r = await post('/api/clear', {}, true);
+  if (r === 401) { document.getElementById('pairMsg').textContent = '코드가 맞지 않습니다'; return; }
+  if (r === 429) { document.getElementById('pairMsg').textContent = '잠시 차단됨 - 1분 후 다시'; return; }
+  localStorage.setItem('sc_pair', v);
+  hidePair();
+  log('페어링 완료', true);
+});
+document.getElementById('pairCode').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('pairGo').click();
+});
+
+async function post(path, body, quiet) {
   try {
-    const r = await fetch('/api/input', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-    const j = await r.json();
-    log(j.msg || (j.ok ? 'OK' : '실패'), !!j.ok);
-  } catch(e) { log('전송 실패: ' + e, false); }
+    const r = await fetch(path, {method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-Pairing-Code': S.code},
+      body: JSON.stringify(body)});
+    if (r.status === 401) { showPair('코드를 입력하세요'); return 401; }
+    if (r.status === 429) { if (!quiet) log('잠시 차단됨 (1분)', false); return 429; }
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 409 || j.error === 'game_not_focused') {
+      flashFocus();
+      if (!quiet) log('게임 창이 앞에 없음', false);
+      return 409;
+    }
+    if (!quiet) log(j.msg || (r.ok ? '전송됨' : '실패'), r.ok && j.ok !== false);
+    return r.ok ? 200 : r.status;
+  } catch (e) {
+    if (!quiet) log('PC 연결 실패', false);
+    return 0;
+  }
 }
-document.querySelectorAll('[data-k]').forEach(b => {
-  b.addEventListener('click', () => send({type:'press', key: b.dataset.k}));
-});
-document.querySelectorAll('[data-macro]').forEach(b => {
-  b.addEventListener('click', () => send({type:'macro', name: b.dataset.macro}));
-});
-document.getElementById('btnHoldW').addEventListener('click', () => send({type:'hold', key:'W', ms:3000}));
-document.getElementById('btnHoldS').addEventListener('click', () => send({type:'hold', key:'S', ms:3000}));
+
+let focusTimer = null;
+function flashFocus() {
+  const b = document.getElementById('focusBadge');
+  b.textContent = '게임이 앞에 없음';
+  b.className = 'off';
+  clearTimeout(focusTimer);
+  focusTimer = setTimeout(() => { b.textContent = ''; b.className = ''; }, 3000);
+}
+
+function sendInput(type, key, ms) {
+  return post('/api/input', {type, key, ms: ms || 0});
+}
+
+function render() {
+  const L = S.layout || FALLBACK_LAYOUT;
+  const pages = L.pages || [];
+  if (S.page >= pages.length) S.page = 0;
+  const tabs = document.getElementById('tabs');
+  tabs.innerHTML = '';
+  pages.forEach((p, i) => {
+    const t = document.createElement('div');
+    t.className = 'tab' + (i === S.page ? ' on' : '');
+    t.textContent = p.name || ('페이지 ' + (i + 1));
+    t.addEventListener('click', () => { S.page = i; render(); });
+    tabs.appendChild(t);
+  });
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  (pages[S.page] ? pages[S.page].buttons : []).forEach(b => {
+    const el = document.createElement('div');
+    el.className = 'btn';
+    const modeTxt = b.mode === 'hold' ? '누르는 동안' :
+                    b.mode === 'timed' ? ((b.ms || 1000) / 1000 + '초') : '';
+    el.innerHTML = '<span class="lbl"></span>' +
+      (modeTxt ? '<span class="mode"></span>' : '');
+    el.querySelector('.lbl').textContent = b.label || b.keys;
+    if (modeTxt) el.querySelector('.mode').textContent = modeTxt;
+    bindButton(el, b);
+    grid.appendChild(el);
+  });
+}
+
+function bindButton(el, b) {
+  const key = b.keys, mode = b.mode || 'tap';
+  let holdTimer = null, holding = false;
+  const release = () => {
+    if (!holding) return;
+    holding = false;
+    clearInterval(holdTimer);
+    el.classList.remove('active');
+    delete S.holds[key];
+    sendInput('up', key).then(() => {});
+  };
+  el.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    el.classList.add('active');
+    if (mode === 'hold') {
+      holding = true;
+      S.holds[key] = true;
+      sendInput('down', key);
+      holdTimer = setInterval(() => sendInput('refresh', key), 2000);
+    } else if (mode === 'timed') {
+      sendInput('timed', key, b.ms || 1000);
+      setTimeout(() => el.classList.remove('active'), Math.min(b.ms || 1000, 1500));
+    } else {
+      sendInput('press', key);
+      setTimeout(() => el.classList.remove('active'), 130);
+    }
+  });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev =>
+    el.addEventListener(ev, release));
+}
+
 document.getElementById('btnTest').addEventListener('click', async () => {
-  const rs = prompt('RS 값 입력 (예: 6340)');
+  const rs = prompt('테스트 RS 값 (예: 6340)');
   if (!rs) return;
-  const r = await fetch('/api/test', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({rs: parseInt(rs)})});
-  log('테스트 ' + rs, r.ok);
+  await post('/api/test', {rs: parseInt(rs)});
 });
 document.getElementById('btnClear').addEventListener('click', async () => {
-  await fetch('/api/clear', {method:'POST'}); log('지우기 완료', true);
+  await post('/api/clear', {});
 });
+
+window.addEventListener('pagehide', () => {
+  Object.keys(S.holds).forEach(k => sendInput('up', k));
+});
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+(async function init() {
+  try {
+    const r = await fetch('/api/layout');
+    if (r.ok) S.layout = await r.json();
+  } catch (e) {}
+  if (!S.layout || !S.layout.pages || !S.layout.pages.length) {
+    document.getElementById('grid').innerHTML =
+      '<div style="color:#7e93a6;padding:20px">레이아웃을 불러오지 못했습니다. PC에서 덱 설정 파일을 확인하세요.</div>';
+    return;
+  }
+  render();
+})();
 </script>
 </body>
 </html>
