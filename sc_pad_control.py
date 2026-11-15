@@ -496,23 +496,39 @@ class ScanState:
 
 
 # 가상키 코드 (ctypes SendInput용) — 허용 키만 허용
-_KEY_CODES = {
+# SC 기본 키 표기(tablet-deck 방식): lalt/ralt/rctrl/lctrl/lshift/n, np_, minus, backspace 등.
+# _KEY_ALIASES가 SC 표기를 윈도우 가상키 상수로 변환하고, _KEY_CODES가 이를 화이트리스트로 쓴다.
+_KEY_ALIASES = {
+    # 수식자 (방위를 구분)
+    "LALT": 0xA4, "RALT": 0xA5, "LSHIFT": 0xA0, "RSHIFT": 0xA1,
+    "LCTRL": 0xA2, "RCTRL": 0xA3, "LCONTROL": 0xA2, "RCONTROL": 0xA3,
+    "CONTROL": 0x11, "SHIFT": 0x10, "MENU": 0x12,
+    "LMETA": 0x5B, "RMETA": 0x5C,
+    # 특수
     "SPACE": 0x20, "ENTER": 0x0D, "ESC": 0x1B, "TAB": 0x09, "BS": 0x08,
+    "BACKSPACE": 0x08, "BACKSLASH": 0xDC, "DELETE": 0x2E, "DEL": 0x2E,
+    "INSERT": 0x2D, "HOME": 0x24, "END": 0x23, "PAGEUP": 0x21,
+    "PGUP": 0x21, "PAGEDOWN": 0x22, "PGDOWN": 0x22,
     "UP": 0x26, "DOWN": 0x28, "LEFT": 0x25, "RIGHT": 0x27,
+    "MINUS": 0xBD, "EQUAL": 0xBB, "LBRACKET": 0xDB, "RBRACKET": 0xDD,
+    "SEMICOLON": 0xBA, "APOSTROPHE": 0xDE, "COMMA": 0xBC, "PERIOD": 0xBE,
+    "SLASH": 0xBF, "BACKQUOTE": 0xC0,
+    # 숫자패드 — SendInput 가상키 (Num Lock ON 전제)
+    "NP_0": 0x60, "NP_1": 0x61, "NP_2": 0x62, "NP_3": 0x63,
+    "NP_4": 0x64, "NP_5": 0x65, "NP_6": 0x66, "NP_7": 0x67,
+    "NP_8": 0x68, "NP_9": 0x69, "NP_PERIOD": 0x6E, "NP_DIVIDE": 0x6F,
+    "NP_MULTIPLY": 0x6A, "NP_MINUS": 0x6D, "NP_SUBTRACT": 0x6D,
+    "NP_ADD": 0x6B, "NP_ENTER": 0x0D,
+    # F키
     "F1": 0x70, "F2": 0x71, "F3": 0x72, "F4": 0x73, "F5": 0x74,
     "F6": 0x75, "F7": 0x76, "F8": 0x77, "F9": 0x78, "F10": 0x79,
     "F11": 0x7A, "F12": 0x7B,
-    "LMENU": 0xA4, "RMENU": 0xA5, "LSHIFT": 0xA0, "RSHIFT": 0xA1,
-    "LCONTROL": 0xA2, "RCONTROL": 0xA3, "LMETA": 0x5B, "RMETA": 0x5C,
-    "SHIFT": 0x10, "CONTROL": 0x11, "MENU": 0x12,
     "MOUSE1": None, "MOUSE2": None, "MOUSE3": None,  # 추후 마우스 확장용 예약
 }
-# 숫자/문자 키는 ASCII -> 가상키
-for _ch in "0123456789":
-    _KEY_CODES[_ch] = ord(_ch)
-for _ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
-    _KEY_CODES[_ch] = ord(_ch)
-# SC 채굴 단축키 (채굴 세션 기본)
+# 영문 단일키는 ASCII 그대로
+for _ch in "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+    _KEY_ALIASES.setdefault(_ch, ord(_ch))
+# SC 기본 바인딩에 등장하는 모든 문자 키를 화이트리스트에 명시
 for _name, _code in [
     ("N", 0x4E), ("B", 0x42), ("V", 0x56), ("M", 0x4D), ("C", 0x43),
     ("TAB", 0x09), ("Q", 0x51), ("E", 0x45), ("F", 0x46), ("G", 0x47),
@@ -521,28 +537,64 @@ for _name, _code in [
     ("Z", 0x5A), ("X", 0x58), ("R", 0x52), ("D", 0x44), ("W", 0x57),
     ("S", 0x53), ("A", 0x41),
 ]:
-    _KEY_CODES.setdefault(_name, _code)
+    _KEY_ALIASES.setdefault(_name, _code)
 
+# 화이트리스트 (조합 허용 포함): 단일키 + 수식자만. 조합은 _send_input에서 파싱.
+_KEY_CODES = dict(_KEY_ALIASES)
+_MODIFIERS = {k for k in ("LALT", "RALT", "LSHIFT", "RSHIFT", "LCTRL", "RCTRL",
+                          "LCONTROL", "RCONTROL", "CONTROL", "SHIFT", "MENU", "LMETA", "RMETA")}
+
+# 함선 중심 매크로 (tablet-deck 레이아웃 기준)
 _MACROS = {
-    # SC 채굴 기본 매크로 (태블릿에서 자주 쓰는 시퀀스)
-    "land":   [("press", "N"), ("hold", "W", 3000), ("press", "S")],
-    "scan":   [("press", "V"), ("hold", "LCONTROL", 400), ("press", "V")],
-    "abort":  [("press", "B"), ("press", "V")],
-    "mining_on":  [("press", "B")],
-    "mining_off": [("press", "B")],
+    "quantum":    [("hold", "B", 1500)],  # Quantum Jump 홀드
+    "quantum_full": [("hold", "B", 3000)],
+    "exit_seat":  [("hold", "Y", 1200)],
+    "auto_land":  [("hold", "N", 1500)],  # Landing Gear timed 1500
+    "self_destruct": [("hold", "BACKSPACE", 3000)],
+    "land":   [("press", "N"), ("hold", "W", 1000), ("press", "S")],
     "stow":   [("hold", "LCONTROL", 200), ("press", "S")],
-    "exit_seat": [("press", "F")],
 }
+
+# SC 키 문자열 파싱: "lalt+n" / "ralt+np_8" / "f5" / "TAB" 등
+_COMBO_SPLIT_RE = None  # 컴파일 지연 (모듈 로드 무거운 작업 방지)
+
+def _parse_combo(name: str):
+    """반환: (수식자 가상키 리스트, 본키 가상키). 실패 시 ValueError."""
+    if not name or not name.strip():
+        raise ValueError("키가 비어 있음")
+    parts = [p.strip() for p in name.strip().upper().split("+") if p.strip()]
+    mods, main = [], None
+    for p in parts:
+        if p in _MODIFIERS:
+            mods.append(_KEY_CODES[p])
+        elif main is None:
+            vk = _KEY_CODES.get(p)
+            if vk is None:
+                raise ValueError(f"허용되지 않는 키: {name}")
+            main = vk
+        else:
+            raise ValueError(f"키 조합이 너무 깁니다: {name}")
+    if main is None and mods:
+        # 수식자만 (예: 단독 LCONTROL) — 본키가 없으면 마지막을 본키로 취급
+        main = mods.pop()
+    if main is None:
+        raise ValueError(f"허용되지 않는 키: {name}")
+    return mods, main
 
 
 def _send_input(action: str, key: str, ms: int = 0, macro: str = ""):
-    """태블릿 -> PC 입력 전송. 반환: (ok, msg)."""
+    """태블릿 -> PC 입력 전송. 반환: (ok, msg).
+
+    type: press(scan만) / hold / tap / timed / macro.
+    tablet-deck 표기(lalt+n, ralt+np_5 등 포함) 지원. press도 조합 키를 지원한다.
+    """
+    if action == "tap":
+        action = "press"
     if sys.platform != "win32":
         return (False, "Windows에서만 입력 전송 가능")
     import ctypes
     from ctypes import wintypes
 
-    # 정확한 구조 정의
     class KEYBDINPUT(ctypes.Structure):
         _fields_ = [("wVk", wintypes.WORD), ("wScan", wintypes.WORD),
                     ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD),
@@ -564,39 +616,43 @@ def _send_input(action: str, key: str, ms: int = 0, macro: str = ""):
     class INPUT2(ctypes.Structure):
         _fields_ = [("type", wintypes.DWORD), ("u", _InputUnion)]
 
-    def _press(vk, flags=0):
+    def _emit(vk, flags=0):
         import ctypes as _ct
         inp = INPUT2()
         inp.type = 1  # INPUT_KEYBOARD
         inp.u.ki = KEYBDINPUT(vk, 0, flags, 0, None)
         _ct.windll.user32.SendInput(1, _ct.byref(inp), _ct.sizeof(INPUT2))
 
-    def _do_press(key_name):
-        vk = _KEY_CODES.get(key_name.upper())
-        if vk is None:
-            raise ValueError(f"허용되지 않는 키: {key_name}")
-        _press(vk, 0)  # KEYEVENTF_KEYDOWN
-        _press(vk, 2)  # KEYEVENTF_KEYUP
+    def _combo_press(key_name):
+        mods, main = _parse_combo(key_name)
+        for m in mods:
+            _emit(m, 0)
+        _emit(main, 0)
+        _emit(main, 2)
+        for m in reversed(mods):
+            _emit(m, 2)
 
-    def _do_hold(key_name, duration_ms):
-        vk = _KEY_CODES.get(key_name.upper())
-        if vk is None:
-            raise ValueError(f"허용되지 않는 키: {key_name}")
-        _press(vk, 0)
+    def _combo_hold(key_name, duration_ms):
+        mods, main = _parse_combo(key_name)
+        for m in mods:
+            _emit(m, 0)
+        _emit(main, 0)
         time.sleep(duration_ms / 1000.0)
-        _press(vk, 2)
+        _emit(main, 2)
+        for m in reversed(mods):
+            _emit(m, 2)
 
     try:
         if action == "press":
             if not key:
                 return (False, "키가 비어 있음")
-            _do_press(key)
+            _combo_press(key)
             return (True, f"{key} 눌림")
-        elif action == "hold":
+        elif action in ("hold", "timed"):
             if not key:
                 return (False, "키가 비어 있음")
             ms = max(50, min(ms, 10000))
-            _do_hold(key, ms)
+            _combo_hold(key, ms)
             return (True, f"{key} {ms}ms 유지")
         elif action == "macro":
             seq = _MACROS.get(macro)
@@ -604,9 +660,9 @@ def _send_input(action: str, key: str, ms: int = 0, macro: str = ""):
                 return (False, f"알 수 없는 매크로: {macro}")
             for item in seq:
                 if item[0] == "press":
-                    _do_press(item[1])
+                    _combo_press(item[1])
                 elif item[0] == "hold":
-                    _do_hold(item[1], item[2])
+                    _combo_hold(item[1], item[2])
                 time.sleep(0.05)
             return (True, f"매크로 {macro} 실행")
         else:
