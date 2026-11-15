@@ -1,51 +1,27 @@
-# 변경 내역 — 태블릿 컨트롤 덱 재구성 (2026-11-15)
+# 태블릿 덱 변경 이력
 
-## 배경
-- 마스터 지시: "채광 결과는 테블릿에서 볼 필요 없음. PC화면에서만 표시."
-- 기존 FastAPI(8377)를 결과 표시가 아닌 **태블릿 입력 전용**으로 재활용.
+## 2026-11-16 - 키바인드 연결과 플레이 안전성 보강
 
-## 삭제됨
-- `overlay.html` 파일 삭제 — 채광 결과를 표시하던 웹 오버레이 제거
-- `calibrate.html` 파일 삭제 — 웹 캘리브레이션 제거. PC에서는 F10(화면 영역 지정)으로만 설정
-- 엔드포인트 삭제: `GET /api/state`, `GET /api/screenshot`, `WS /ws`
-- `ScanState`의 subscribe/unsubscribe/_broadcast 구조 제거
-- `requirements.txt`에서 `websockets` 제거
-- `import io` 미사용 제거
+- PC에서 사용하는 actionmaps.xml/내보내기 XML을 직접 선택. LIVE/PTU/오래된 export를 임의 선택하지 않음. 게임 파일 읽기 전용
+- 지원하는 키보드/마우스 rebind를 버튼에 반영하고 현재 키 표시. 명시적 키 해제만 비활성화하며 조이스틱 전용 항목은 키보드 해제로 오인하지 않음
+- 1단계에서 커스텀 레이아웃을 기본값으로 잘못 분류했던 키 교정. 커뮤니티 바인딩 자료를 참고하며 게임 패치별 최신 기본값 보장은 아님
+- 마우스 버튼/휠 입력 지원, 탭 60ms, 휠은 탭 1회당 1노치만 전송
+- 스캔 핑/함선 모드처럼 길게 눌러야 하는 동작은 누르는 동안만 홀드
+- 게임 포커스 확인 실패 시 차단. Windows 64비트 프로세스 핸들 형식 수정. 포커스를 잃으면 홀드 해제
+- 앱 전역 단축키를 Ctrl+Alt+F8~F11로 이동해 게임 F8/F11 등과 분리
+- 새로 추가한 제어 창 버튼이 잘리지 않도록 설정 영역 스크롤 적용
+- 태블릿은 4열 큰 버튼, 폰은 3열. 탭 전환/화면 숨김 때 홀드 해제 요청, 무응답 5초 해제
+- 자폭/탈출/카고 투하 같은 위험 동작을 기본 덱에서 제외. 이동키/매크로/자동 반복 없음
+- 페어링 확인은 별도 읽기 요청으로 처리. 연결 확인 때문에 PC 광물 결과를 지우지 않음. 연결 실패를 페어링 성공으로 표시하지 않음
+- 회귀 테스트 17개 추가 및 로컬 통과. Windows exe 빌드는 기존 HTTP 스모크 검증 유지
 
-## 신규
-- `control_deck.html` — 결과 표시 없음. 입력 버튼만 있는 태블릿 페이지
-  - 채굴 조작: B/V/N/C/TAB/LCONTROL(홀드 400ms)
-  - 이동: W/A/S/D + W/S 홀드 3초
-  - 매크로: land(착륙 시퀀스), scan(미네랄 샷), abort(채굴 중단)
-  - 기타: F/G/M/SPACE/ENTER/ESC + 테스트/지우기
-  - 하단 로그로 전송 성공/실패 표시
-- `POST /api/input` 엔드포인트 — `{type: press|hold|macro, key, ms, name}`
-- `_send_input()` 헬퍼 — Windows `ctypes` `SendInput`만 사용, 패키지 추가 없음
-- `_KEY_CODES` 화이트리스트 — 허용 키만 전송, 외는 400으로 차단
-- `_MACROS` — land/scan/abort/mining_on/off/stow/exit_seat
+## 2026-11-16 - 보안 기반과 페이지 덱 (v0.26~v0.30)
 
-## 수정
-- `GET /`가 이제 `control_deck.html`을 서빙 (기존 overlay.html → control_deck.html)
-- `config.json` — 누락됐던 `rs_search: "wide"` 추가
-- `scm_helper.py` DEFAULTS — `overlay_x 960 → 1150`, `overlay_anchor_v2: True` 추가
-  → config 파일 없이 실행해도 업로드 config와 동일 값으로 동작
-- `main()` 시작 안내문 — "…/calibrate 에서 지정하세요" → "제어 창의 '화면 영역 지정'(F10)으로 지정하세요"
-- README — 태블릿 컨트롤 덱 설명으로 교체, 다운로드/동작확인 문구 갱신
-- `.github/workflows/build.yml` — --add-data를 control_deck.html로 교체
-- 빌드 스모크 테스트 — `/api/state`(제거됨) 대신 `GET /` 200으로 변경
+- 채굴/선박/일반 3개 페이지와 JSON 레이아웃 분리
+- 6자리 페어링 코드, 5회 인증 실패 시 IP별 1분 차단
+- 게임 포커스 검사, down/up 홀드와 2초 갱신/5초 무응답 해제
+- exe 옆 deck_layout.json으로 기본 배치 교체, PC 제어 창에서 파일 열기
+- WASD 이동 버튼 및 매크로 제거
+- v0.28/29 중간 빌드는 실패했으며 원인은 이 기록에서 단정하지 않음. 최종 v0.30 빌드/실행 파일 업로드 확인
 
-## 유지
-- PC 오버레이: tkinter 투명 창 (`OverlayWindow`) — 그대로. 채광 결과는 PC 화면에만 표시
-- `/api/test`, `/api/clear` — 진단용으로 유지
-- `/calibrate` 페이지 자체는 제거했지만, PC 내장 calibrate(F10 캘리브레이터) 코드는 유지
-
-## 검증
-- `py_compile` 통과
-- FastAPI 라우트 확인: `/`, `/api/input`, `/api/test`, `/api/clear`만 존재
-- `POST /api/input` 동작 확인 (Mac에서는 "Windows에서만 입력 전송 가능"으로 안전 차단)
-- Actions 빌드: 성공 (run 43675857329), smoke test 통과, Release v0.22
-
-## 사용법
-1. Releases에서 최신 exe 다운로드 후 실행
-2. 태블릿에서 `http://PC_IP:8377` 접속 (같은 Wi-Fi)
-3. 버튼을 누르면 PC가 SC 창에 키 입력 전송
+실제 게임 플레이, 패치별 기본 키, 안티치트 허용 여부는 별도 검증이 필요합니다. 구현 테스트 통과와 게임 정책 허용은 다릅니다.

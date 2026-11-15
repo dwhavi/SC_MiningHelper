@@ -25,5 +25,6 @@
   "pairing_code": "",
   "only_when_game_focused": true,
   "hold_timeout_ms": 5000,
-  "tap_ms": 60
+  "tap_ms": 60,
+  "actionmaps_path": ""
 }

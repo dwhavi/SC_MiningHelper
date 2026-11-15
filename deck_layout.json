@@ -1,57 +1,217 @@
 {
   "name": "SC_PadControl 덱",
-  "version": 2,
+  "version": 3,
   "tap_ms": 60,
-  "notes": "SC 4.x 기본 키 기준 (nodieCode/tablet-deck 레이아웃 참고). 인게임에서 키를 바꿨으면 여기서도 같은 키로 고치세요. mode: tap=짧게 누름, hold=누르는 동안, timed=ms만큼 유지.",
+  "notes": "커뮤니티 기본 키 참고값. PC에서 현재 사용하는 키바인드 XML을 직접 선택하세요. 부분 내보내기의 미지정 키는 기본값이므로 게임 설정과 대조 필요. 자동 반복/매크로 없음.",
   "pages": [
     {
       "id": "mining",
       "name": "채굴",
       "buttons": [
-        {"label": "채굴 모드", "keys": "ralt+m", "mode": "tap"},
-        {"label": "레이저 발사", "keys": "rctrl+f", "mode": "tap"},
-        {"label": "파쇄/추출", "keys": "rctrl+t", "mode": "tap"},
-        {"label": "출력 +", "keys": "rctrl+w", "mode": "hold"},
-        {"label": "출력 −", "keys": "rctrl+s", "mode": "hold"},
-        {"label": "모듈 1", "keys": "lalt+1", "mode": "tap"},
-        {"label": "모듈 2", "keys": "lalt+2", "mode": "tap"},
-        {"label": "모듈 3", "keys": "lalt+3", "mode": "tap"},
-        {"label": "스캔 핑", "keys": "v", "mode": "tap"},
-        {"label": "스캔 모드", "keys": "ralt+v", "mode": "tap"}
+        {
+          "label": "채굴 모드",
+          "keys": "m",
+          "mode": "tap",
+          "action": "seat_general.v_toggle_mining_mode"
+        },
+        {
+          "label": "레이저 발사",
+          "keys": "mouse1",
+          "mode": "tap",
+          "action": "spaceship_mining.v_toggle_mining_laser_fire"
+        },
+        {
+          "label": "파쇄/추출 전환",
+          "keys": "lalt+mouse1",
+          "mode": "tap",
+          "action": "spaceship_mining.v_toggle_mining_laser_type"
+        },
+        {
+          "label": "출력 +",
+          "keys": "mwheel_up",
+          "mode": "tap",
+          "action": "spaceship_mining.v_increase_mining_throttle"
+        },
+        {
+          "label": "출력 −",
+          "keys": "mwheel_down",
+          "mode": "tap",
+          "action": "spaceship_mining.v_decrease_mining_throttle"
+        },
+        {
+          "label": "모듈 1",
+          "keys": "lalt+1",
+          "mode": "tap",
+          "action": "spaceship_mining.v_mining_use_consumable1"
+        },
+        {
+          "label": "모듈 2",
+          "keys": "lalt+2",
+          "mode": "tap",
+          "action": "spaceship_mining.v_mining_use_consumable2"
+        },
+        {
+          "label": "모듈 3",
+          "keys": "lalt+3",
+          "mode": "tap",
+          "action": "spaceship_mining.v_mining_use_consumable3"
+        },
+        {
+          "label": "스캔 핑",
+          "keys": "tab",
+          "mode": "hold",
+          "action": "spaceship_radar.v_invoke_ping"
+        },
+        {
+          "label": "스캔 모드",
+          "keys": "v",
+          "mode": "tap",
+          "action": "seat_general.v_toggle_scan_mode"
+        }
       ]
     },
     {
       "id": "ship",
       "name": "선박",
       "buttons": [
-        {"label": "비행 준비", "keys": "r", "mode": "tap"},
-        {"label": "전원", "keys": "u", "mode": "tap"},
-        {"label": "랜딩기어", "keys": "n", "mode": "tap"},
-        {"label": "착륙 요청", "keys": "lalt+n", "mode": "tap"},
-        {"label": "VTOL", "keys": "k", "mode": "tap"},
-        {"label": "전등", "keys": "l", "mode": "tap"},
-        {"label": "퀀텀 점프", "keys": "b", "mode": "hold"},
-        {"label": "좌석 내리기", "keys": "y", "mode": "timed", "ms": 1200},
-        {"label": "무기 출력", "keys": "f5", "mode": "tap"},
-        {"label": "엔진 출력", "keys": "f6", "mode": "tap"},
-        {"label": "실드 출력", "keys": "f7", "mode": "tap"},
-        {"label": "출력 초기화", "keys": "f8", "mode": "tap"}
+        {
+          "label": "비행 준비",
+          "keys": "ralt+r",
+          "mode": "tap",
+          "action": "spaceship_general.v_flightready"
+        },
+        {
+          "label": "전원",
+          "keys": "u",
+          "mode": "tap",
+          "action": "spaceship_power.v_power_toggle"
+        },
+        {
+          "label": "추력",
+          "keys": "i",
+          "mode": "tap",
+          "action": "spaceship_power.v_power_toggle_thrusters"
+        },
+        {
+          "label": "랜딩기어",
+          "keys": "n",
+          "mode": "tap",
+          "action": "spaceship_movement.v_toggle_landing_system"
+        },
+        {
+          "label": "착륙 요청",
+          "keys": "lalt+n",
+          "mode": "tap",
+          "action": "spaceship_movement.v_atc_request"
+        },
+        {
+          "label": "VTOL",
+          "keys": "k",
+          "mode": "tap",
+          "action": "spaceship_movement.v_vtol_toggle"
+        },
+        {
+          "label": "전등",
+          "keys": "l",
+          "mode": "tap",
+          "action": "lights_controller.v_lights"
+        },
+        {
+          "label": "퀀텀 모드",
+          "keys": "b",
+          "mode": "hold",
+          "action": "spaceship_movement.v_master_mode_cycle_long"
+        },
+        {
+          "label": "무기 출력",
+          "keys": "f5",
+          "mode": "tap",
+          "action": "spaceship_power.v_engineering_assignment_weapons_increase"
+        },
+        {
+          "label": "엔진 출력",
+          "keys": "f6",
+          "mode": "tap",
+          "action": "spaceship_power.v_engineering_assignment_engine_increase"
+        },
+        {
+          "label": "실드 출력",
+          "keys": "f7",
+          "mode": "tap",
+          "action": "spaceship_power.v_engineering_assignment_shields_increase"
+        },
+        {
+          "label": "출력 초기화",
+          "keys": "f8",
+          "mode": "tap",
+          "action": "spaceship_power.v_engineering_assignment_reset"
+        }
       ]
     },
     {
       "id": "general",
       "name": "일반",
       "buttons": [
-        {"label": "상호작용", "keys": "f", "mode": "tap"},
-        {"label": "모비글라스", "keys": "f1", "mode": "tap"},
-        {"label": "스타맵", "keys": "f2", "mode": "tap"},
-        {"label": "인벤토리", "keys": "i", "mode": "tap"},
-        {"label": "연락처", "keys": "f11", "mode": "tap"},
-        {"label": "3인칭", "keys": "f4", "mode": "tap"},
-        {"label": "문 열기", "keys": "lalt+o", "mode": "tap"},
-        {"label": "문 토글", "keys": "np_period", "mode": "tap"},
-        {"label": "채팅", "keys": "enter", "mode": "tap"},
-        {"label": "ESC", "keys": "esc", "mode": "tap"}
+        {
+          "label": "상호작용",
+          "keys": "f",
+          "mode": "tap",
+          "action": "spaceship_view.v_view_interact"
+        },
+        {
+          "label": "모비글라스",
+          "keys": "f1",
+          "mode": "tap",
+          "action": "player.mobiglas"
+        },
+        {
+          "label": "스타맵",
+          "keys": "f2",
+          "mode": "tap",
+          "action": "player.v_starmap"
+        },
+        {
+          "label": "인벤토리",
+          "keys": "i",
+          "mode": "tap",
+          "action": "player_choice.pc_pit_inventory"
+        },
+        {
+          "label": "커서 전환",
+          "keys": "f11",
+          "mode": "tap",
+          "action": "player.toggle_cursor_input"
+        },
+        {
+          "label": "3인칭",
+          "keys": "f4",
+          "mode": "tap",
+          "action": "player.thirdperson"
+        },
+        {
+          "label": "헬멧",
+          "keys": "ralt+h",
+          "mode": "tap",
+          "action": "player.toggleEquipHelmet"
+        },
+        {
+          "label": "손전등",
+          "keys": "t",
+          "mode": "tap",
+          "action": "player.toggle_flashlight"
+        },
+        {
+          "label": "채팅 창",
+          "keys": "f12",
+          "mode": "tap",
+          "action": "default.toggle_chat"
+        },
+        {
+          "label": "ESC",
+          "keys": "esc",
+          "mode": "tap",
+          "action": ""
+        }
       ]
     }
   ]

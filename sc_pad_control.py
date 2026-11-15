@@ -56,6 +56,7 @@ DEFAULTS = {
     "only_when_game_focused": True,  # SC가 최전면 창일 때만 입력 전송
     "hold_timeout_ms": 5000,      # 홀드 무응답 자동 해제 (stuck 키 방지)
     "tap_ms": 60,                 # 탭 1회의 키 눌림 길이
+    "actionmaps_path": "",        # 사용자가 고른 SC 프로필/내보내기 XML (빈 값=기본 키)
 }
 
 
@@ -545,6 +546,12 @@ for _name, _code in [
 ]:
     _KEY_ALIASES.setdefault(_name, _code)
 
+# 마우스 버튼/휠 의사 키 — SendInput 마우스 이벤트로 전송 (가상키가 아닌 sentinel)
+_KEY_ALIASES.update({
+    "MOUSE1": 0x1001, "MOUSE2": 0x1002, "MOUSE3": 0x1003,
+    "MWHEEL_UP": 0x1004, "MWHEEL_DOWN": 0x1005,
+})
+
 # 화이트리스트 (조합 허용 포함): 단일키 + 수식자만. 조합은 _send_input에서 파싱.
 _KEY_CODES = dict(_KEY_ALIASES)
 _MODIFIERS = {k for k in ("LALT", "RALT", "LSHIFT", "RSHIFT", "LCTRL", "RCTRL",
@@ -583,35 +590,45 @@ def _parse_combo(name: str):
 
 
 def _emit_vk(vk, flags=0):
-    """SendInput으로 가상키 하나 전송 (Windows 전용)."""
+    """Windows SendInput: scan-code keys and single mouse button/wheel events."""
     import ctypes
     from ctypes import wintypes
 
     class KEYBDINPUT(ctypes.Structure):
         _fields_ = [("wVk", wintypes.WORD), ("wScan", wintypes.WORD),
                     ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD),
-                    ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
-
+                    ("dwExtraInfo", ctypes.c_size_t)]
     class MOUSEINPUT(ctypes.Structure):
-        _fields_ = [("dx", ctypes.c_long), ("dy", ctypes.c_long),
+        _fields_ = [("dx", wintypes.LONG), ("dy", wintypes.LONG),
                     ("mouseData", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
-                    ("time", wintypes.DWORD),
-                    ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
-
+                    ("time", wintypes.DWORD), ("dwExtraInfo", ctypes.c_size_t)]
     class HARDWAREINPUT(ctypes.Structure):
         _fields_ = [("uMsg", wintypes.DWORD), ("wParamL", wintypes.WORD),
                     ("wParamH", wintypes.WORD)]
-
-    class _InputUnion(ctypes.Union):
+    class InputUnion(ctypes.Union):
         _fields_ = [("ki", KEYBDINPUT), ("mi", MOUSEINPUT), ("hi", HARDWAREINPUT)]
-
-    class INPUT2(ctypes.Structure):
-        _fields_ = [("type", wintypes.DWORD), ("u", _InputUnion)]
-
-    inp = INPUT2()
-    inp.type = 1  # INPUT_KEYBOARD
-    inp.u.ki = KEYBDINPUT(vk, 0, flags, 0, None)
-    ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT2))
+    class INPUT(ctypes.Structure):
+        _fields_ = [("type", wintypes.DWORD), ("u", InputUnion)]
+    u32 = ctypes.WinDLL("user32", use_last_error=True)
+    u32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
+    u32.SendInput.restype = wintypes.UINT
+    inp = INPUT()
+    if vk >= 0x1000:
+        inp.type = 0
+        if vk in (0x1004, 0x1005):
+            if flags:
+                return
+            inp.u.mi = MOUSEINPUT(0, 0, 120 if vk == 0x1004 else 0xFFFFFF88, 0x0800, 0, 0)
+        else:
+            down, up = {0x1001:(2,4), 0x1002:(8,16), 0x1003:(32,64)}[vk]
+            inp.u.mi = MOUSEINPUT(0, 0, 0, up if flags else down, 0, 0)
+    else:
+        scan = u32.MapVirtualKeyW(vk, 4)
+        extended = 1 if scan & 0xFF00 else 0
+        inp.type = 1
+        inp.u.ki = KEYBDINPUT(0, scan & 0xFF, 0x0008 | flags | extended, 0, 0)
+    if u32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) != 1:
+        raise OSError("Windows가 입력 전송을 거부했습니다. 게임과 실행 권한을 확인하세요.")
 
 
 def _combo_down(key_name):
@@ -633,23 +650,32 @@ def _combo_press(key_name):
     for m in mods:
         _emit_vk(m, 0)
     _emit_vk(main, 0)
+    time.sleep(0.06)
     _emit_vk(main, 2)
     for m in reversed(mods):
         _emit_vk(m, 2)
 
 
 def _game_focused():
-    """Star Citizen이 최전면 창인지 확인 (Windows 전용, 그 외 OS는 True).
+    """Star Citizen이 최전면 창인지 확인 (Windows 전용, 그 외 OS는 False).
 
-    확인 자체가 실패하면(True) 입력을 막지 않는다.
+    확인에 실패하면 입력을 막는다.
     """
     if sys.platform != "win32":
-        return True
+        return False
     import ctypes
     from ctypes import wintypes
     try:
         u32 = ctypes.windll.user32
         k32 = ctypes.windll.kernel32
+        k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        k32.OpenProcess.restype = wintypes.HANDLE
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+        k32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD,
+                                                  wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+        u32.GetForegroundWindow.restype = wintypes.HWND
+        u32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        u32.GetWindowThreadProcessId.restype = wintypes.DWORD
         hwnd = u32.GetForegroundWindow()
         if not hwnd:
             return False
@@ -665,11 +691,93 @@ def _game_focused():
             size = wintypes.DWORD(260)
             if not k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
                 return False
-            return "starcitizen" in (buf.value or "").lower()
+            return os.path.basename(buf.value or "").lower() == "starcitizen.exe"
         finally:
             k32.CloseHandle(h)
     except Exception:
-        return True
+        return False
+
+
+# --- actionmaps.xml 연동: 인게임 리바인드를 덱 키에 반영 -------------------
+# 게임 프로필 파일을 읽기만 한다 (쓰기 없음). 파일이 없거나 액션이 없으면
+# deck_layout.json의 기본 키를 그대로 사용.
+_AM_CACHE = {"path": None, "mtime": 0.0, "map": {}, "seen": set()}
+
+
+def _resolve_actionmaps_path(cfg):
+    manual = str(cfg.get("actionmaps_path") or "").strip()
+    return manual if manual and os.path.isfile(manual) else None
+
+
+def _am_convert(inp):
+    """rebind 입력을 덱 키 표기로 변환. 변환 불가(조이스틱/축 등)는 None."""
+    if not inp or "_" not in inp:
+        return None
+    dev, rest = inp.split("_", 1)
+    rest = rest.strip().lower()
+    if not rest:
+        return None
+    if dev == "kb1":
+        return rest
+    if dev == "mouse1":
+        m = re.match(r"button([123])$", rest)
+        if m:
+            return "mouse" + m.group(1)
+        if rest in ("mwheel_up", "mwheel_down"):
+            return rest
+        return None  # maxis_z 등 축은 방향을 알 수 없음
+    return None  # 조이스틱/패드는 키보드 전송 불가
+
+
+def _load_action_bindings(cfg):
+    """actionmaps.xml의 액션 → 키 맵 (mtime 캐시).
+
+    반환: (bindings, seen, path). seen은 파일에 등장한 액션 전체 —
+    키보드/마우스 해제가 명시된 경우에만 빈 바인딩으로 반환한다.
+    """
+    path = _resolve_actionmaps_path(cfg)
+    if not path:
+        if _AM_CACHE["path"]:
+            _AM_CACHE.update({"path": None, "mtime": 0.0, "map": {}, "seen": set()})
+        return {}, set(), None
+    try:
+        mt = os.path.getmtime(path)
+    except OSError:
+        return {}, set(), None
+    if _AM_CACHE["path"] == path and _AM_CACHE["mtime"] == mt:
+        return _AM_CACHE["map"], _AM_CACHE["seen"], path
+    bindings, seen = {}, set()
+    try:
+        import xml.etree.ElementTree as ET
+        if os.path.getsize(path) > 2 * 1024 * 1024:
+            raise ValueError("XML 파일은 2MB 이하여야 합니다")
+        root = ET.parse(path).getroot()
+        for am in root.iter("actionmap"):
+            amn = am.get("name") or ""
+            for act in am.iter("action"):
+                an = act.get("name") or ""
+                if not an:
+                    continue
+                seen.add(amn + "." + an)
+                for rb in act.iter("rebind"):
+                    raw = rb.get("input") or ""
+                    if raw.startswith(("kb1_", "mouse1_")):
+                        if not raw.split("_", 1)[1].strip():
+                            bindings.setdefault(amn + "." + an, "")
+                            continue
+                        conv = _am_convert(raw)
+                        if conv:
+                            try:
+                                _parse_combo(conv)
+                            except ValueError:
+                                continue
+                            bindings[amn + "." + an] = conv
+                            break
+    except Exception as e:
+        print(f"[deck] actionmaps 읽기 실패: {e}")
+        return {}, set(), None
+    _AM_CACHE.update({"path": path, "mtime": mt, "map": bindings, "seen": seen})
+    return bindings, seen, path
 
 
 def _send_input(action: str, key: str, ms: int = 0):
@@ -705,8 +813,11 @@ def _send_input(action: str, key: str, ms: int = 0):
         elif action == "down":
             if not norm:
                 return (False, "키가 비어 있음")
-            _combo_down(norm)
+            if _parse_combo(norm)[1] in (0x1004, 0x1005):
+                return (False, "휠은 탭만 지원합니다")
             with _HOLD_LOCK:
+                if norm not in _ACTIVE_HOLDS:
+                    _combo_down(norm)
                 _ACTIVE_HOLDS[norm] = time.monotonic()
             return (True, f"{norm} 누르는 중")
         elif action == "refresh":
@@ -719,7 +830,7 @@ def _send_input(action: str, key: str, ms: int = 0):
                 return (False, "키가 비어 있음")
             with _HOLD_LOCK:
                 _ACTIVE_HOLDS.pop(norm, None)
-            _combo_up(norm)
+                _combo_up(norm)
             return (True, f"{norm} 뗌")
         else:
             return (False, f"알 수 없는 액션: {action}")
@@ -734,9 +845,13 @@ def hold_reaper(cfg):
     timeout = max(1.0, float(cfg.get("hold_timeout_ms", 5000)) / 1000.0)
     while True:
         time.sleep(0.5)
-        now = time.monotonic()
         with _HOLD_LOCK:
-            expired = [k for k, t in _ACTIVE_HOLDS.items() if now - t > timeout]
+            if not _ACTIVE_HOLDS:
+                continue
+        now = time.monotonic()
+        lost_focus = cfg.get("only_when_game_focused", True) and not _game_focused()
+        with _HOLD_LOCK:
+            expired = [k for k, t in _ACTIVE_HOLDS.items() if now - t > timeout or lost_focus]
         for k in expired:
             with _HOLD_LOCK:
                 _ACTIVE_HOLDS.pop(k, None)
@@ -788,7 +903,7 @@ def create_app(state, cfg):
                                 status_code=429)
         want = str(cfg.get("pairing_code") or "")
         got = request.headers.get("x-pairing-code", "")
-        if not want or hmac.compare_digest(got, want):
+        if want and hmac.compare_digest(got, want):
             pair_fails.pop(ip, None)
             return None
         rec = [t for t in pair_fails.get(ip, []) if now - t < 60]
@@ -802,6 +917,11 @@ def create_app(state, cfg):
         return JSONResponse({"ok": False, "msg": "페어링 코드가 맞지 않음"},
                             status_code=401)
 
+    @app.get("/api/auth")
+    def auth_status(request: Request):
+        deny = _check_pair(request)
+        return deny if deny is not None else {"ok": True}
+
     @app.get("/", response_class=HTMLResponse)
     def index():
         # 태블릿 컨트롤 덱 메인 페이지
@@ -809,16 +929,32 @@ def create_app(state, cfg):
 
     @app.get("/api/layout")
     def deck_layout():
-        """덱 레이아웃 JSON. exe 옆 deck_layout.json이 있으면 그것을 우선."""
+        """덱 레이아웃 JSON. exe 옆 deck_layout.json이 있으면 그것을 우선.
+        actionmaps.xml이 발견되면 action이 있는 버튼의 키를 인게임 바인딩으로 교체."""
         user_path = os.path.join(EXE_DIR, "deck_layout.json")
         p = user_path if os.path.exists(user_path) else _data_path("deck_layout.json")
         if not p:
             return JSONResponse({"pages": []})
         try:
             with open(p, "r", encoding="utf-8") as f:
-                return json.load(f)
+                layout = json.load(f)
         except Exception as e:
             return JSONResponse({"pages": [], "error": str(e)}, status_code=500)
+        bindings, seen, am_path = _load_action_bindings(cfg)
+        layout["actionmaps_active"] = bool(am_path)
+        if am_path:
+            for page in layout.get("pages", []):
+                for btn in page.get("buttons", []):
+                    act = btn.get("action") or ""
+                    if not act:
+                        continue
+                    if act in bindings:
+                        btn["keys"] = bindings[act]
+                        btn["keys_source"] = "actionmaps"
+                        btn["unbound"] = not bool(bindings[act])
+                    elif act in seen:
+                        btn["keys_source"] = "default_unverified"
+        return layout
 
     @app.post("/api/input")
     def tablet_input(body: InputRequest, request: Request):
@@ -1249,7 +1385,7 @@ class Calibrator:
         self.rect = None
         self.rect_label = None
         self.regions = {}
-        # 현재 설정된 영역을 기준선으로 항상 표시 (F11 표시와 동일한 색)
+        # 현재 설정된 영역을 기준선으로 항상 표시 (Ctrl+Alt+F11 표시와 동일한 색)
         self._draw_reference(cfg.get("rs_region"), "현재 RS 영역", "#46c8e6")
         self._draw_reference(cfg.get("panel_region"), "현재 패널 영역", "#c4a2ff")
         self._set_hint()
@@ -1372,7 +1508,7 @@ class ControlApp:
 
     def _card(self, title):
         ctk = self.ctk
-        card = ctk.CTkFrame(self.root, fg_color="#0d141d", corner_radius=12,
+        card = ctk.CTkFrame(self.content, fg_color="#0d141d", corner_radius=12,
                             border_width=1, border_color="#1c2a38")
         card.pack(padx=14, pady=(10, 0), fill="x")
         head = ctk.CTkFrame(card, fg_color="transparent")
@@ -1395,6 +1531,9 @@ class ControlApp:
                                  corner_radius=10)
         self.pill.pack(side="right", pady=6)
 
+        self.content = ctk.CTkScrollableFrame(self.root, fg_color="transparent",
+                                              scrollbar_button_color="#253746")
+        self.content.pack(fill="both", expand=True, padx=0, pady=0)
         # ---- 스캔 카드
         card, head = self._card("스캔")
         self.scan_sw = ctk.CTkSwitch(
@@ -1427,19 +1566,19 @@ class ControlApp:
             button_hover_color=_ACCENT_HOV)
         self.opacity.set(float(self.cfg.get("overlay_opacity", 0.88)) * 100)
         self.opacity.pack(fill="x", padx=14, pady=(0, 6))
-        ctk.CTkButton(card, text="위치 조정 (F9)", command=self.toggle_adjust,
+        ctk.CTkButton(card, text="위치 조정 (Ctrl+Alt+F9)", command=self.toggle_adjust,
                       fg_color="#14202c", hover_color="#1a2c3c",
                       text_color="#dfe9f2", height=30).pack(
             fill="x", padx=14, pady=(0, 12))
 
         # ---- 설정 카드
         card, head = self._card("설정")
-        ctk.CTkButton(card, text="화면 영역 지정 (F10)",
+        ctk.CTkButton(card, text="화면 영역 지정 (Ctrl+Alt+F10)",
                       command=self.start_calibrate,
                       fg_color=_ACCENT, hover_color=_ACCENT_HOV,
                       text_color=_ON_ACCENT, height=32,
                       font=self.F_H).pack(fill="x", padx=14, pady=(2, 6))
-        ctk.CTkButton(card, text="스캔 영역 표시 (F11)",
+        ctk.CTkButton(card, text="스캔 영역 표시 (Ctrl+Alt+F11)",
                       command=self.toggle_regions,
                       fg_color="#14202c", hover_color="#1a2c3c",
                       text_color="#dfe9f2", height=30).pack(
@@ -1473,6 +1612,15 @@ class ControlApp:
                       fg_color="#14202c", hover_color="#1a2c3c",
                       text_color="#dfe9f2", height=30).pack(
             fill="x", padx=14, pady=(0, 4))
+        ctk.CTkButton(card, text="키바인드 XML 선택", command=self.choose_actionmaps,
+                      fg_color="#14202c", hover_color="#1a2c3c",
+                      text_color="#dfe9f2", height=30).pack(fill="x", padx=14, pady=(0, 4))
+        _am_b, _am_s, _am_p = _load_action_bindings(self.cfg)
+        _am_txt = ("키바인드: actionmaps.xml 추적 중" if _am_p
+                   else "키바인드: 기본 레이아웃 (actionmaps 없음)")
+        self.am_status = ctk.CTkLabel(card, text=_am_txt, font=self.F_SM,
+                                     text_color="#5a6b7a")
+        self.am_status.pack(anchor="w", padx=14, pady=(0, 2))
         self.srv_label = ctk.CTkLabel(card, text="", font=self.F_SM,
                                       text_color="#5a6b7a")
         self.srv_label.pack(anchor="w", padx=14, pady=(0, 10))
@@ -1484,7 +1632,7 @@ class ControlApp:
 
         # ---- 푸터
         ctk.CTkLabel(self.root,
-                     text="F8 표시/숨기기 · F9 위치 · F10 영역 지정",
+                     text="Ctrl+Alt + F8 표시 · F9 위치 · F10 영역 · F11 확인",
                      font=self.F_SM, text_color="#46545f").pack(pady=(12, 0))
         ctk.CTkButton(self.root, text="종료", command=self.quit, width=90,
                       fg_color="transparent", hover_color="#2c1719",
@@ -1565,6 +1713,21 @@ class ControlApp:
         import webbrowser
         webbrowser.open("http://localhost:{}".format(self.cfg.get("port", 8377)))
 
+    def choose_actionmaps(self):
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(parent=self.root,
+            title="현재 사용하는 SC 프로필 actionmaps.xml 또는 내보내기 파일 선택",
+            filetypes=[("Star Citizen keybindings", "*.xml")])
+        if path:
+            self.cfg["actionmaps_path"] = path
+            save_config(self.cfg)
+            _, _, active = _load_action_bindings(self.cfg)
+            self.am_status.configure(text="키바인드: 선택한 XML 연결됨" if active
+                                     else "키바인드: XML 확인 실패 (기본 키 사용)")
+            from tkinter import messagebox
+            messagebox.showinfo("키바인드", "선택을 저장했습니다. 태블릿 페이지를 새로고침하세요.",
+                                parent=self.root)
+
     def open_deck_settings(self):
         """exe 옆 deck_layout.json을 연다. 없으면 내장 기본값을 복사해 둔다."""
         p = os.path.join(EXE_DIR, "deck_layout.json")
@@ -1585,6 +1748,14 @@ class ControlApp:
             print(f"[deck] 설정 파일 열기 실패: {e}")
 
     def quit(self):
+        with _HOLD_LOCK:
+            held = list(_ACTIVE_HOLDS)
+            _ACTIVE_HOLDS.clear()
+        for key in held:
+            try:
+                _combo_up(key)
+            except Exception:
+                pass
         save_config(self.cfg)
         try:
             self.root.destroy()
@@ -1601,8 +1772,8 @@ class ControlApp:
             from ctypes import wintypes
             u32 = ctypes.windll.user32
             for hid, vk in ((1, 0x77), (2, 0x78), (3, 0x79),
-                            (4, 0x7A)):  # F8/F9/F10/F11
-                if not u32.RegisterHotKey(None, hid, 0x4000, vk):
+                            (4, 0x7A)):  # Ctrl+Alt+F8/Ctrl+Alt+F9/Ctrl+Alt+F10/Ctrl+Alt+F11
+                if not u32.RegisterHotKey(None, hid, 0x4000 | 0x0002 | 0x0001, vk):
                     print(f"[hotkey] F{vk - 0x76} 등록 실패 (다른 프로그램이 사용 중)")
             msg = wintypes.MSG()
             while u32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
@@ -1794,8 +1965,8 @@ def main():
     threading.Thread(target=capture_loop, args=(cfg, state),
                      daemon=True).start()
     if not cfg.get("rs_region"):
-        print("[안내] 캡처 영역 미설정: 제어 창의 '화면 영역 지정'(F10) 또는 "
-              f"제어 창의 '화면 영역 지정'(F10)으로 지정하세요.")
+        print("[안내] 캡처 영역 미설정: 제어 창의 '화면 영역 지정'(Ctrl+Alt+F10) 또는 "
+              f"제어 창의 '화면 영역 지정'(Ctrl+Alt+F10)으로 지정하세요.")
     print("=" * 56)
     print(" SC 패드 컨트롤 시작")
     print(f"  이 PC에서:        http://localhost:{port}")
