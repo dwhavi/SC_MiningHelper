@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>SC 태블릿 컨트롤 덱</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: #0a0e14; color: #e8eef5;
+    font-family: "Malgun Gothic", "Segoe UI", sans-serif;
+    padding: 10px; min-height: 100vh; touch-action: manipulation;
+  }
+  h1 { font-size: 16px; margin: 4px 0 10px; display: flex; justify-content: space-between; align-items: center; }
+  h1 .dot { width: 10px; height: 10px; border-radius: 50%; background: #41d99a; }
+  h1 .dot.bad { background: #da3633; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .btn {
+    border: 1px solid #2a3542; border-radius: 10px; background: #161f2a;
+    color: #e8eef5; font-size: 15px; font-weight: 600;
+    padding: 18px 6px; text-align: center; cursor: pointer;
+    min-height: 62px; touch-action: manipulation; user-select: none;
+  }
+  .btn:active { background: #1f6feb; border-color: #1f6feb; }
+  .btn.big { grid-column: span 3; background: #1a3245; border-color: #2ea9c6; font-size: 18px; }
+  .btn.gray { background: #232c38; color: #aab4c0; }
+  h2 { font-size: 12px; color: #6c7885; margin: 14px 0 6px; letter-spacing: 1px; }
+  #log { margin-top: 12px; font-size: 12px; color: #6c7885; max-height: 120px; overflow-y: auto;
+         border-top: 1px solid #2a3542; padding-top: 8px; line-height: 1.5; }
+  #log .ok { color: #7ee2a0; }
+  #log .err { color: #ff8f8a; }
+  .row { display: flex; gap: 8px; margin-top: 8px; }
+  .row .btn { flex: 1; }
+  .btn.danger { background: #3a1a1a; border-color: #da3633; color: #ff8f8a; }
+</style>
+</head>
+<body>
+<h1>SC 컨트롤 덱 <span class="dot" id="dot"></span></h1>
+
+<h2>채굴 조작</h2>
+<div class="grid">
+  <div class="btn" data-k="B">B<br><small>채굴 켜기</small></div>
+  <div class="btn" data-k="V">V<br><small>미네랄 샷</small></div>
+  <div class="btn" data-k="N">N<br><small>자석 보호막</small></div>
+  <div class="btn" data-k="C">C<br><small>커터</small></div>
+  <div class="btn" data-k="LCONTROL">Ctrl<br><small>홀드 400ms</small></div>
+  <div class="btn" data-k="TAB">TAB<br><small>파티/메뉴</small></div>
+</div>
+
+<h2>이동</h2>
+<div class="grid">
+  <div class="btn" data-k="W">W</div>
+  <div class="btn" data-k="S">S</div>
+  <div class="btn" data-k="A">A</div>
+  <div class="btn" data-k="D">D</div>
+  <div class="btn" id="btnHoldW">W<br><small>홀드 3초</small></div>
+  <div class="btn" id="btnHoldS">S<br><small>홀드 3초</small></div>
+</div>
+
+<h2>매크로</h2>
+<div class="grid">
+  <div class="btn big" data-macro="land">착륙 시퀀스</div>
+  <div class="btn big" data-macro="scan">미네랄 샷 시퀀스</div>
+  <div class="btn big" data-macro="abort">채굴 중단</div>
+</div>
+
+<h2>기타</h2>
+<div class="grid">
+  <div class="btn" data-k="F">F<br><small>석션/도킹</small></div>
+  <div class="btn" data-k="G">G<br><small>선내/장비</small></div>
+  <div class="btn" data-k="M">M<br><small>스타맵</small></div>
+  <div class="btn" data-k="SPACE">SPACE</div>
+  <div class="btn" data-k="ENTER">ENTER</div>
+  <div class="btn danger" data-k="ESC">ESC</div>
+</div>
+
+<div class="row">
+  <div class="btn gray" id="btnTest">테스트 모드</div>
+  <div class="btn gray" id="btnClear">지우기</div>
+</div>
+
+<div id="log"></div>
+
+<script>
+const logEl = document.getElementById('log'), dot = document.getElementById('dot');
+function log(msg, ok) {
+  const d = document.createElement('div');
+  d.className = ok ? 'ok' : 'err';
+  d.textContent = new Date().toLocaleTimeString('ko-KR') + '  ' + msg;
+  logEl.prepend(d);
+  while (logEl.children.length > 20) logEl.lastChild.remove();
+  dot.className = 'dot' + (ok ? '' : ' bad');
+}
+async function send(body) {
+  try {
+    const r = await fetch('/api/input', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const j = await r.json();
+    log(j.msg || (j.ok ? 'OK' : '실패'), !!j.ok);
+  } catch(e) { log('전송 실패: ' + e, false); }
+}
+document.querySelectorAll('[data-k]').forEach(b => {
+  b.addEventListener('click', () => send({type:'press', key: b.dataset.k}));
+});
+document.querySelectorAll('[data-macro]').forEach(b => {
+  b.addEventListener('click', () => send({type:'macro', name: b.dataset.macro}));
+});
+document.getElementById('btnHoldW').addEventListener('click', () => send({type:'hold', key:'W', ms:3000}));
+document.getElementById('btnHoldS').addEventListener('click', () => send({type:'hold', key:'S', ms:3000}));
+document.getElementById('btnTest').addEventListener('click', async () => {
+  const rs = prompt('RS 값 입력 (예: 6340)');
+  if (!rs) return;
+  const r = await fetch('/api/test', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({rs: parseInt(rs)})});
+  log('테스트 ' + rs, r.ok);
+});
+document.getElementById('btnClear').addEventListener('click', async () => {
+  await fetch('/api/clear', {method:'POST'}); log('지우기 완료', true);
+});
+</script>
+</body>
+</html>

@@ -12,7 +12,7 @@ Star Citizen 광물 스캔 결과를 게임 화면 위에 직접 띄워 주는 �
 - 기준 장비(Prospector + Helix I + Rieger-C3 + Focus III)로 채굴 가능 / 어려움 / 사실상 불가 판정 (BETA)
 - 실행 시 뜨는 제어 창(다크 테마): 스캔 ON/OFF, 오버레이 표시/숨기기, 영역 지정, 위치 조정, 투명도, 상태 표시, 종료 — cmd 창 없이 앱 창만 표시
 - 전역 단축키: **F8** 오버레이 표시/숨기기 · **F9** 위치 조정 모드 · **F10** 화면 영역 지정
-- (선택) 웹 페이지: 같은 Wi-Fi의 태블릿/폰에서도 볼 수 있습니다
+- (선택) 태블릿 컨트롤 덱: http://PC_IP:8377 — PC에 입력만 전송, 결과 표시 없음
 
 ## 다운로드와 실행 (Python 설치 불필요)
 
@@ -22,7 +22,7 @@ Star Citizen 광물 스캔 결과를 게임 화면 위에 직접 띄워 주는 �
 
 제어 창에서 스캔 ON/OFF, 오버레이 표시, 투명도, 위치 조정, 화면 영역 지정, 종료를 할 수 있습니다. 오류가 나면 제어 창 배너에 표시되고, 자세한 로그는 exe 옆 `scm_helper.log`에 기록됩니다.
 
-동작 확인 (게임 없이 가능): 브라우저에서 http://localhost:8377 → 오른쪽 아래 "테스트 모드" → RS에 `6340` 입력 → 제어 창의 "최근 스캔"과 오버레이에 "Quantainium ×2"가 뜨면 정상.
+동작 확인 (게임 없이 가능): 태블릿/브라우저에서 http://PC_IP:8377 접속 → 입력 버튼 동작 확인. RS 테스트는 브라우저에서 /api/test 로 가능한데, PC 오버레이는 tkinter 창에 표시됨.
 
 ## 첫 설정 (최초 1회, 1분)
 
@@ -31,7 +31,7 @@ Star Citizen 광물 스캔 결과를 게임 화면 위에 직접 띄워 주는 �
 3. 1/2: 스캔 시 RS 숫자가 뜨는 자리를 드래그 → 2/2: 근접 스캔 패널 자리를 드래그. 끝 (재시작 불필요).
 4. 오버레이 위치를 옮기고 싶으면 **F9** → 드래그 → 다시 **F9**로 저장.
 
-해상도나 HUD 위치가 바뀌면 F10으로 다시 지정하세요. 웹 브라우저 방식(http://localhost:8377/calibrate)도 그대로 쓸 수 있습니다.
+해상도나 HUD 위치가 바뀌면 F10으로 다시 지정하세요.
 
 ## 참고
 
@@ -51,5 +51,5 @@ pyinstaller --noconfirm --onefile --name SCMiningHelper ^
   --collect-all rapidocr_onnxruntime --collect-all onnxruntime ^
   --add-data "signatures.json;." --add-data "minerals.json;." ^
   --add-data "equipment.json;." --add-data "config.json;." ^
-  --add-data "overlay.html;." --add-data "calibrate.html;." scm_helper.py
+  --add-data "control_deck.html;." scm_helper.py
 ```

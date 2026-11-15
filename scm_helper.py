@@ -7,7 +7,6 @@ Star Citizen 광물 스캔 결과를 화면 위에 표시하는 로컬 오버레
 """
 import asyncio
 import difflib
-import io
 import json
 import os
 import re
@@ -40,7 +39,7 @@ DEFAULTS = {
     "poll_interval_ms": 500,
     "ocr_engine": "auto",
     "overlay_enabled": True,
-    "overlay_x": 960,
+    "overlay_x": 1150,
     "overlay_y": 320,
     "overlay_width": 380,
     "overlay_opacity": 0.88,
@@ -50,6 +49,7 @@ DEFAULTS = {
         "resist_hard_pct": 55.0,
         "instability_hard": 800,
     },
+    "overlay_anchor_v2": True,
 }
 
 
@@ -453,24 +453,6 @@ class ScanState:
         self._minerals = minerals
         self._equipment = equipment
         self._thresholds = thresholds
-        self._subscribers = []
-
-    def subscribe(self):
-        q = asyncio.Queue(maxsize=5)
-        self._subscribers.append(q)
-        return q
-
-    def unsubscribe(self, q):
-        if q in self._subscribers:
-            self._subscribers.remove(q)
-
-    def _broadcast(self):
-        data = json.dumps(self._state, ensure_ascii=False)
-        for q in self._subscribers:
-            try:
-                q.put_nowait(data)
-            except asyncio.QueueFull:
-                pass
 
     def get(self):
         with self._lock:
@@ -502,7 +484,6 @@ class ScanState:
                 phase = "close_scan"
             self._state["phase"] = phase
             self._state["updated_at"] = time.strftime("%H:%M:%S")
-        self._broadcast()
 
     def clear(self):
         with self._lock:
@@ -511,13 +492,145 @@ class ScanState:
                 "inert_pct": None, "resistance_pct": None, "instability": None,
                 "mass": None, "rock_verdict": None,
                 "updated_at": time.strftime("%H:%M:%S")})
-        self._broadcast()
 
+
+
+# 가상키 코드 (ctypes SendInput용) — 허용 키만 허용
+_KEY_CODES = {
+    "SPACE": 0x20, "ENTER": 0x0D, "ESC": 0x1B, "TAB": 0x09, "BS": 0x08,
+    "UP": 0x26, "DOWN": 0x28, "LEFT": 0x25, "RIGHT": 0x27,
+    "F1": 0x70, "F2": 0x71, "F3": 0x72, "F4": 0x73, "F5": 0x74,
+    "F6": 0x75, "F7": 0x76, "F8": 0x77, "F9": 0x78, "F10": 0x79,
+    "F11": 0x7A, "F12": 0x7B,
+    "LMENU": 0xA4, "RMENU": 0xA5, "LSHIFT": 0xA0, "RSHIFT": 0xA1,
+    "LCONTROL": 0xA2, "RCONTROL": 0xA3, "LMETA": 0x5B, "RMETA": 0x5C,
+    "SHIFT": 0x10, "CONTROL": 0x11, "MENU": 0x12,
+    "MOUSE1": None, "MOUSE2": None, "MOUSE3": None,  # 추후 마우스 확장용 예약
+}
+# 숫자/문자 키는 ASCII -> 가상키
+for _ch in "0123456789":
+    _KEY_CODES[_ch] = ord(_ch)
+for _ch in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
+    _KEY_CODES[_ch] = ord(_ch)
+# SC 채굴 단축키 (채굴 세션 기본)
+for _name, _code in [
+    ("N", 0x4E), ("B", 0x42), ("V", 0x56), ("M", 0x4D), ("C", 0x43),
+    ("TAB", 0x09), ("Q", 0x51), ("E", 0x45), ("F", 0x46), ("G", 0x47),
+    ("H", 0x48), ("J", 0x4A), ("K", 0x4B), ("L", 0x4C), ("T", 0x54),
+    ("U", 0x55), ("Y", 0x59), ("I", 0x49), ("O", 0x4F), ("P", 0x50),
+    ("Z", 0x5A), ("X", 0x58), ("R", 0x52), ("D", 0x44), ("W", 0x57),
+    ("S", 0x53), ("A", 0x41),
+]:
+    _KEY_CODES.setdefault(_name, _code)
+
+_MACROS = {
+    # SC 채굴 기본 매크로 (태블릿에서 자주 쓰는 시퀀스)
+    "land":   [("press", "N"), ("hold", "W", 3000), ("press", "S")],
+    "scan":   [("press", "V"), ("hold", "LCONTROL", 400), ("press", "V")],
+    "abort":  [("press", "B"), ("press", "V")],
+    "mining_on":  [("press", "B")],
+    "mining_off": [("press", "B")],
+    "stow":   [("hold", "LCONTROL", 200), ("press", "S")],
+    "exit_seat": [("press", "F")],
+}
+
+
+def _send_input(action: str, key: str, ms: int = 0, macro: str = ""):
+    """태블릿 -> PC 입력 전송. 반환: (ok, msg)."""
+    if sys.platform != "win32":
+        return (False, "Windows에서만 입력 전송 가능")
+    import ctypes
+    from ctypes import wintypes
+
+    # 정확한 구조 정의
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [("wVk", wintypes.WORD), ("wScan", wintypes.WORD),
+                    ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD),
+                    ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
+
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_ = [("dx", ctypes.c_long), ("dy", ctypes.c_long),
+                    ("mouseData", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
+                    ("time", wintypes.DWORD),
+                    ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
+
+    class HARDWAREINPUT(ctypes.Structure):
+        _fields_ = [("uMsg", wintypes.DWORD), ("wParamL", wintypes.WORD),
+                    ("wParamH", wintypes.WORD)]
+
+    class _InputUnion(ctypes.Union):
+        _fields_ = [("ki", KEYBDINPUT), ("mi", MOUSEINPUT), ("hi", HARDWAREINPUT)]
+
+    class INPUT2(ctypes.Structure):
+        _fields_ = [("type", wintypes.DWORD), ("u", _InputUnion)]
+
+    def _press(vk, flags=0):
+        import ctypes as _ct
+        inp = INPUT2()
+        inp.type = 1  # INPUT_KEYBOARD
+        inp.u.ki = KEYBDINPUT(vk, 0, flags, 0, None)
+        _ct.windll.user32.SendInput(1, _ct.byref(inp), _ct.sizeof(INPUT2))
+
+    def _do_press(key_name):
+        vk = _KEY_CODES.get(key_name.upper())
+        if vk is None:
+            raise ValueError(f"허용되지 않는 키: {key_name}")
+        _press(vk, 0)  # KEYEVENTF_KEYDOWN
+        _press(vk, 2)  # KEYEVENTF_KEYUP
+
+    def _do_hold(key_name, duration_ms):
+        vk = _KEY_CODES.get(key_name.upper())
+        if vk is None:
+            raise ValueError(f"허용되지 않는 키: {key_name}")
+        _press(vk, 0)
+        time.sleep(duration_ms / 1000.0)
+        _press(vk, 2)
+
+    try:
+        if action == "press":
+            if not key:
+                return (False, "키가 비어 있음")
+            _do_press(key)
+            return (True, f"{key} 눌림")
+        elif action == "hold":
+            if not key:
+                return (False, "키가 비어 있음")
+            ms = max(50, min(ms, 10000))
+            _do_hold(key, ms)
+            return (True, f"{key} {ms}ms 유지")
+        elif action == "macro":
+            seq = _MACROS.get(macro)
+            if seq is None:
+                return (False, f"알 수 없는 매크로: {macro}")
+            for item in seq:
+                if item[0] == "press":
+                    _do_press(item[1])
+                elif item[0] == "hold":
+                    _do_hold(item[1], item[2])
+                time.sleep(0.05)
+            return (True, f"매크로 {macro} 실행")
+        else:
+            return (False, f"알 수 없는 액션: {action}")
+    except ValueError as e:
+        return (False, str(e))
+    except Exception as e:
+        return (False, f"입력 전송 실패: {e}")
 
 def create_app(state, cfg):
-    from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-    from fastapi.responses import HTMLResponse, JSONResponse, Response
+    """FastAPI 앱 — 태블릿 컨트롤 덱 전용.
+
+    이전 웹 오버레이(overlay.html, /api/state, /api/screenshot, /ws)는 마스터 지시로 제거.
+    태블릿은 결과 표시가 필요 없으며, 입력만 전송한다.
+    """
+    from fastapi import FastAPI
+    from fastapi.responses import HTMLResponse, JSONResponse
     from pydantic import BaseModel
+
+    class InputRequest(BaseModel):
+        type: str                      # press | hold | macro
+        key: str = ""                  # press/hold용 키 이름 (예: "B", "LCONTROL", "UP")
+        ms: int = 0                    # hold용 유지 시간 (ms)
+        name: str = ""                 # macro용 이름 (예: "land", "scan")
 
     class TestInput(BaseModel):
         rs: int | None = None
@@ -526,12 +639,7 @@ def create_app(state, cfg):
         instability: float | None = None
         mass: float | None = None
 
-    class CalibrateInput(BaseModel):
-        rs_region: dict
-        panel_region: dict
-
-    app = FastAPI(title="SC Mining Helper", docs_url=None, redoc_url=None)
-    shot_cache = {"ts": 0.0, "png": None}
+    app = FastAPI(title="SC Mining Helper — Tablet Control Deck", docs_url=None, redoc_url=None)
 
     def read_html(name):
         with open(os.path.join(BUNDLE_DIR, name), encoding="utf-8") as f:
@@ -539,35 +647,14 @@ def create_app(state, cfg):
 
     @app.get("/", response_class=HTMLResponse)
     def index():
-        return read_html("overlay.html")
+        # 태블릿 컨트롤 덱 메인 페이지
+        return read_html("control_deck.html")
 
-    @app.get("/calibrate", response_class=HTMLResponse)
-    def calibrate_page():
-        return read_html("calibrate.html")
-
-    @app.get("/api/state")
-    def get_state():
-        return JSONResponse(state.get())
-
-    @app.get("/api/screenshot")
-    def screenshot():
-        now = time.time()
-        if shot_cache["png"] is None or now - shot_cache["ts"] > 15:
-            img = Capturer(cfg.get("monitor", 1)).grab_full()
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            shot_cache["png"] = buf.getvalue()
-            shot_cache["ts"] = now
-        return Response(content=shot_cache["png"], media_type="image/png")
-
-    @app.post("/api/calibrate")
-    def calibrate(body: CalibrateInput):
-        cfg["rs_region"] = body.rs_region
-        cfg["panel_region"] = body.panel_region
-        cfg["capture_enabled"] = True
-        cfg["scan_enabled"] = True
-        save_config(cfg)
-        return {"ok": True, "restart_required": False}
+    @app.post("/api/input")
+    def tablet_input(body: InputRequest):
+        """태블릿 → PC 입력. type: press/hold/macro."""
+        ok, msg = _send_input(body.type, body.key, body.ms, body.name)
+        return JSONResponse({"ok": ok, "msg": msg}, status_code=200 if ok else 400)
 
     @app.post("/api/test")
     def test_input(body: TestInput):
@@ -583,19 +670,6 @@ def create_app(state, cfg):
     def clear():
         state.clear()
         return {"ok": True}
-
-    @app.websocket("/ws")
-    async def ws(websocket: WebSocket):
-        await websocket.accept()
-        q = state.subscribe()
-        try:
-            await websocket.send_text(json.dumps(state.get(), ensure_ascii=False))
-            while True:
-                await websocket.send_text(await q.get())
-        except (WebSocketDisconnect, RuntimeError):
-            pass
-        finally:
-            state.unsubscribe(q)
 
     return app
 
@@ -1496,7 +1570,7 @@ def main():
                      daemon=True).start()
     if not cfg.get("rs_region"):
         print("[안내] 캡처 영역 미설정: 제어 창의 '화면 영역 지정'(F10) 또는 "
-              f"http://localhost:{port}/calibrate 에서 지정하세요.")
+              f"제어 창의 '화면 영역 지정'(F10)으로 지정하세요.")
     print("=" * 56)
     print(" SC 광물 오버레이 시작")
     print(f"  이 PC에서:        http://localhost:{port}")

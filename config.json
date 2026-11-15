@@ -6,6 +6,8 @@
   "monitor": 1,
   "rs_region": null,
   "panel_region": null,
+  "rs_search": "wide",
+  "rs_wide_region": null,
   "poll_interval_ms": 500,
   "ocr_engine": "auto",
   "overlay_enabled": true,
