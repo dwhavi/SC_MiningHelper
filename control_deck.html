@@ -14,6 +14,7 @@
   header { display:flex; align-items:center; justify-content:space-between;
            padding:10px 14px; border-bottom:1px solid var(--line); }
   header h1 { font-size:16px; margin:0; letter-spacing:1px; color:var(--accent); }
+  #settingsOpen { border:1px solid #285567; background:#102633; color:#b4e5ec; border-radius:7px; padding:7px 12px; font-size:13px; cursor:pointer; }
   #focusBadge { font-size:12px; color:var(--dim); }
   #focusBadge.off { color:#ff5f5f; }
   #tabs { display:flex; gap:6px; padding:8px 12px 0; }
@@ -110,12 +111,45 @@
     #pageHeading { align-items:flex-start; } #pageCount { padding-top:4px; }
     .btn { min-height:100px; } .btn .lbl { font-size:14px; }
   }
+  #keyDialog { width:min(850px,calc(100vw - 24px)); max-height:90dvh; padding:0;
+    color:var(--fg); background:#0d1721; border:1px solid #2a4c5e; border-radius:14px; }
+  #keyDialog::backdrop { background:#02070be8; }
+  .settings-head { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:16px; border-bottom:1px solid #263541; }
+  .settings-head h2 { margin:0; font-size:20px; }
+  .settings-close { background:#172a38; border:0; color:var(--fg); border-radius:6px; padding:8px 12px; cursor:pointer; }
+  .settings-note { margin:12px 16px; font-size:12px; color:#9ab0c2; line-height:1.6; }
+  .settings-body { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:0 16px 16px; }
+  .settings-body label { font-size:13px; color:#b7c8d5; }
+  .settings-body select { width:100%; background:#101f2b; border:1px solid #355064; border-radius:6px; color:var(--fg); padding:10px 8px; font-size:14px; margin:6px 0 12px; }
+  #keyList { display:flex; flex-direction:column; gap:5px; max-height:380px; overflow-y:auto; margin-top:10px; }
+  #keyList button { text-align:left; padding:10px; border:1px solid #243b4b; background:#101f2b; border-radius:6px; cursor:pointer; font-size:13px; }
+  #keyList button.selected { border-color:#46c8e6; background:#143343; }
+  #keyList small { display:block; font-size:11px; color:#9bb2c5; margin-top:4px; }
+  #keyEditor { padding:14px; background:#0a131c; border:1px solid #233846; border-radius:10px; align-self:start; }
+  #keyEditor h3 { font-size:17px; margin:0 0 8px; }
+  #keyCurrent { color:#9bb2c5; font-size:12px; line-height:1.6; margin-bottom:14px; }
+  #keyMods { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:8px 0 12px; }
+  #keyMods label { background:#142431; border-radius:5px; padding:8px 3px; font-size:11px; }
+  #keyMods input { accent-color:#46c8e6; }
+  #keyPreview { color:#79d3e7; font-size:14px; min-height:26px; overflow-wrap:anywhere; }
+  .settings-actions { display:flex; gap:8px; margin-top:10px; }
+  .settings-actions button { flex:1; border:1px solid #345062; background:#173040; border-radius:6px; padding:11px 4px; font-size:13px; cursor:pointer; }
+  #keySave { background:#46c8e6; color:#03222b; border-color:#46c8e6; font-weight:600; }
+  .settings-actions button:disabled { opacity:.4; cursor:not-allowed; }
+  #keyMessage { font-size:12px; line-height:1.5; color:#e7be91; margin-top:12px; min-height:18px; }
+  @media(max-width:600px) {
+    #keyDialog { max-height:94dvh; }
+    .settings-body { grid-template-columns:1fr; gap:12px; }
+    #keyList { max-height:140px; }
+    .settings-head { padding:12px 16px; }
+    .settings-note { margin-top:8px; margin-bottom:8px; }
+  }
 </style>
 </head>
 <body>
 <header>
   <h1>SC 컨트롤 덱</h1>
-  <span id="focusBadge"></span>
+  <span id="focusBadge"></span><button id="settingsOpen" type="button">키 설정</button>
 </header>
 <section id="powerTop" aria-label="전력 배분 공통 조작">
   <div class="power-heading"><h2>전력 배분</h2><span id="powerHint">무기 · 엔진 · 실드</span></div>
@@ -140,6 +174,26 @@
   <div id="pairMsg"></div>
   <button id="pairGo">연결</button>
 </div>
+
+<dialog id="keyDialog" aria-labelledby="keyTitle">
+  <div class="settings-head"><h2 id="keyTitle">덱 키 설정</h2><button class="settings-close" id="keyClose" type="button">닫기</button></div>
+  <p class="settings-note">게임의 키 설정은 바꾸지 않습니다. 게임에서 사용하는 키와 맞춰 지정하세요.<br>PC에 저장되며 다른 패드에도 적용됩니다. 이동 키·매크로는 지원하지 않습니다.</p>
+  <div class="settings-body">
+    <section aria-label="버튼 선택">
+      <label for="keySection">버튼 영역</label><select id="keySection"></select>
+      <label><input type="checkbox" id="keyUnassigned"> 키 지정 필요한 버튼만</label>
+      <div id="keyList" aria-label="설정할 버튼"></div>
+    </section>
+    <section id="keyEditor" aria-label="키 편집">
+      <h3 id="keyButtonName">버튼을 선택하세요</h3><div id="keyCurrent"></div>
+      <label for="keyMain">보낼 키</label><select id="keyMain"></select>
+      <div id="keyMods" aria-label="조합키 수식자"></div>
+      <div id="keyPreview"></div>
+      <div class="settings-actions"><button id="keySave" type="button">이 키로 저장</button><button id="keyReset" type="button">XML로 되돌리기</button></div>
+      <div id="keyMessage" role="status" aria-live="polite"></div>
+    </section>
+  </div>
+</dialog>
 
 <script>
 const S = { code: localStorage.getItem('sc_pair') || '', layout: null,
@@ -233,7 +287,7 @@ function render() {
   document.getElementById('pageCount').textContent = page.buttons.filter(b => !b.unbound && b.keys).length + ' / ' + page.buttons.length + ' 연결';
   const status = document.getElementById('deckStatus');
   status.className = L.actionmaps_active ? 'ready' : '';
-  status.textContent = L.actionmaps_active ? 'XML 연결됨 · 연결된 키도 게임에서 현재 프로필과 확인하세요. 중복·미지정 키는 입력하지 않습니다.' : 'PC에서 키바인드 XML을 선택하세요. 확인되지 않은 버튼은 키 지정 필요로 잠깁니다. ESC는 고정 키입니다.';
+  status.textContent = L.actionmaps_active ? '키 연결 · XML / 사용자 지정 표기를 확인하세요. 중복·미지정 키는 입력하지 않습니다.' : 'PC에서 XML을 선택하거나 상단 키 설정에서 지정하세요. 미지정 버튼은 잠깁니다. ESC는 고정 키입니다.';
   if (L.migration_notice) status.textContent += ' · ' + L.migration_notice;
   const powerControls = document.getElementById('powerControls');
   powerControls.replaceChildren();
@@ -274,7 +328,7 @@ function makeButton(b) {
     el.classList.add('disabled'); el.disabled = true;
     key.textContent = b.disabled_reason || b.blocked_reason || '키 지정 필요';
   } else {
-    key.textContent = b.keys.toUpperCase() + (b.keys_source === 'fixed' ? ' · 고정' : ' · XML');
+    key.textContent = b.keys.toUpperCase() + (b.keys_source === 'fixed' ? ' · 고정' : b.keys_source === 'override' ? ' · 사용자' : ' · XML');
     if (b.mode === 'hold') {
       const hint = document.createElement('span'); hint.className = 'mode';
       hint.textContent = '누르는 동안만'; el.appendChild(hint);
@@ -318,6 +372,95 @@ function bindButton(el, b) {
   ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev =>
     el.addEventListener(ev, release));
 }
+
+const K = {layout:null, selected:null, busy:false};
+const keyDialog = document.getElementById('keyDialog');
+function settingGroups() {
+  const l = K.layout;
+  return [{name:'최상단 전력 배분',buttons:l.power_buttons || []},
+    {name:'공통 바로가기',buttons:l.common_buttons || []}, ...(l.pages || [])];
+}
+function sourceLabel(b) {
+  if (b.unbound || !b.keys) return b.disabled_reason || '키 지정 필요';
+  return b.keys.toUpperCase() + (b.keys_source === 'override' ? ' · 사용자 지정' : b.keys_source === 'fixed' ? ' · 고정 키' : ' · XML');
+}
+function drawKeyList() {
+  const list = document.getElementById('keyList'); list.replaceChildren();
+  const group = settingGroups()[Number(document.getElementById('keySection').value) || 0];
+  const buttons = (group.buttons || []).filter(b => !document.getElementById('keyUnassigned').checked || b.unbound || !b.keys);
+  if (!buttons.some(b => b.id === K.selected)) K.selected = buttons[0]?.id || null;
+  buttons.forEach(b => {
+    const row = document.createElement('button');row.type='button';
+    row.className = b.id === K.selected ? 'selected' : '';
+    row.dataset.settingId = b.id;
+    row.textContent=b.label;
+    const status=document.createElement('small');status.textContent=sourceLabel(b);row.appendChild(status);
+    row.onclick=()=>{if(K.busy)return;K.selected=b.id;drawKeyList();};list.appendChild(row);
+  });
+  if (!buttons.length) list.textContent='해당 버튼이 없습니다';
+  drawKeyEditor();
+}
+function selectedSetting() {
+  return settingGroups().flatMap(g=>g.buttons || []).find(b=>b.id===K.selected);
+}
+function previewSettingKey() {
+  const parts = [...document.querySelectorAll('#keyMods input:checked')].map(e=>e.value);
+  if(document.getElementById('keyMain').value) parts.push(document.getElementById('keyMain').value);
+  const value=parts.join('+');document.getElementById('keyPreview').textContent=value.toUpperCase() || '키를 선택하세요';return value;
+}
+function drawKeyEditor() {
+  const b=selectedSetting();
+  document.getElementById('keyButtonName').textContent=b?.label || '버튼을 선택하세요';
+  document.getElementById('keyCurrent').textContent=b ? '현재: '+sourceLabel(b) : '';
+  document.getElementById('keyMessage').textContent=b?.blocked_reason || '';
+  const locked=!b || !b.action || !!b.blocked_reason;
+  const parts=(b?.override_keys || b?.keys || '').split('+');const main=parts.pop();
+  document.getElementById('keyMain').value=main || '';
+  document.querySelectorAll('#keyMods input').forEach(e=>{e.checked=parts.includes(e.value);e.disabled=locked;});
+  document.getElementById('keyMain').disabled=locked;
+  document.getElementById('keySave').disabled=locked;
+  document.getElementById('keyReset').disabled=locked || !b?.override_keys;
+  previewSettingKey();
+}
+async function openKeySettings() {
+  releaseAll();
+  try {
+    const r=await fetch('/api/key-settings',{headers:{'X-Pairing-Code':S.code}});
+    if(r.status===401){showPair('키 설정 전에 페어링하세요');return;}
+    if(!r.ok)throw new Error();
+    K.layout=await r.json();K.selected=null;
+    const section=document.getElementById('keySection');section.replaceChildren();
+    settingGroups().forEach((g,i)=>{const o=document.createElement('option');o.value=i;o.textContent=g.name;section.appendChild(o);});
+    drawKeyList();keyDialog.showModal();
+  } catch(e){log('키 설정을 불러오지 못했습니다',false);}
+}
+async function saveSetting(reset) {
+  if(K.busy)return;const b=selectedSetting();if(!b)return;
+  const key=reset ? '' : previewSettingKey();
+  if(!reset && !document.getElementById('keyMain').value){document.getElementById('keyMessage').textContent='보낼 키를 선택하세요';return;}
+  K.busy=true;document.getElementById('keySection').disabled=true;document.getElementById('keyUnassigned').disabled=true;document.getElementById('keySave').disabled=true;document.getElementById('keyReset').disabled=true;
+  try {
+    const r=await fetch('/api/key-settings',{method:'POST',headers:{'Content-Type':'application/json','X-Pairing-Code':S.code},body:JSON.stringify({button_id:b.id,keys:key})});
+    const j=await r.json();
+    if(!r.ok){if(r.status===401){keyDialog.close();showPair('다시 페어링하세요');}throw new Error(j.msg || '저장 실패');}
+    releaseAll();K.layout=j.layout;S.layout=j.layout;render();drawKeyList();
+    document.getElementById('keyMessage').textContent=reset ? '사용자 지정을 지웠습니다. XML에 없으면 잠금 상태입니다.' : 'PC에 저장했습니다. 게임의 실제 키와 맞는지 확인하세요.';
+  } catch(e){document.getElementById('keyMessage').textContent=e.message || 'PC 연결 실패';}
+  finally {K.busy=false;document.getElementById('keySection').disabled=false;document.getElementById('keyUnassigned').disabled=false;const b=selectedSetting();const locked=!b || !b.action || !!b.blocked_reason;document.getElementById('keySave').disabled=locked;document.getElementById('keyReset').disabled=locked || !b?.override_keys;}
+}
+const mainKeys=['',...Array.from({length:12},(_,i)=>'f'+(i+1)),...'0123456789',...'bcfghijklmnoprtuvxyz',
+ 'tab','enter','esc','backspace','delete','insert','home','end','pageup','pagedown','minus','equal','lbracket','rbracket','semicolon','apostrophe','comma','period','slash','backslash','backquote',
+ ...Array.from({length:10},(_,i)=>'np_'+i),'np_add','np_subtract','np_multiply','np_divide','np_period','mouse1','mouse2','mouse3','mwheel_up','mwheel_down'];
+mainKeys.forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=k.toUpperCase() || '키 선택';document.getElementById('keyMain').appendChild(o);});
+['lctrl','rctrl','lalt','ralt','lshift','rshift'].forEach(k=>{const label=document.createElement('label');const cb=document.createElement('input');cb.type='checkbox';cb.value=k;cb.onchange=previewSettingKey;label.append(cb,document.createTextNode(k.toUpperCase()));document.getElementById('keyMods').appendChild(label);});
+document.getElementById('settingsOpen').onclick=openKeySettings;
+document.getElementById('keyClose').onclick=()=>{if(!K.busy)keyDialog.close();};
+keyDialog.addEventListener('cancel',e=>{if(K.busy)e.preventDefault();});
+document.getElementById('keySection').onchange=()=>{if(K.busy)return;K.selected=null;drawKeyList();};
+document.getElementById('keyUnassigned').onchange=drawKeyList;
+document.getElementById('keyMain').onchange=previewSettingKey;
+document.getElementById('keySave').onclick=()=>saveSetting(false);
+document.getElementById('keyReset').onclick=()=>saveSetting(true);
 
 document.getElementById('btnTest').addEventListener('click', async () => {
   const rs = prompt('테스트 RS 값 (예: 6340)');

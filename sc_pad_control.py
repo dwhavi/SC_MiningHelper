@@ -803,7 +803,48 @@ def _deck_buttons(layout):
         yield from page.get("buttons", [])
 
 
-def _resolved_deck_layout(cfg):
+_KEY_SETTINGS_LOCK = threading.RLock()
+
+
+def _override_path():
+    return os.path.join(EXE_DIR, "deck_key_overrides.json")
+
+
+def _read_key_overrides():
+    try:
+        if os.path.getsize(_override_path()) > 128 * 1024:
+            return {}
+        with open(_override_path(), encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _validate_override_key(key, mode="tap"):
+    if len(key) > 64 or any(c in key for c in (";", ",", "\n", "\r")):
+        raise ValueError("단일 키 또는 조합키만 지원합니다")
+    parts = key.strip().lower().split("+")
+    if any(not part or part != part.strip() for part in parts):
+        raise ValueError("예: f5 또는 lalt+f5")
+    mods, main = _parse_combo(key)
+    if len(mods) != len(set(mods)) or parts[-1].upper() in _MODIFIERS:
+        raise ValueError("수식자만 지정할 수 없습니다")
+    if any(v in (0x5B, 0x5C) for v in mods) or main in (0x5B, 0x5C):
+        raise ValueError("Windows 키는 지원하지 않습니다")
+    if main in {ord(c) for c in "WASDQE"} | {0x20, 0x25, 0x26, 0x27, 0x28}:
+        raise ValueError("이동 키는 지정할 수 없습니다")
+    alt = any(v in (0x12, 0xA4, 0xA5) for v in mods)
+    ctrl = any(v in (0x11, 0xA2, 0xA3) for v in mods)
+    if ((alt and main in (0x09, 0x1B, 0x73)) or (ctrl and main == 0x1B)
+            or (ctrl and alt and main in (0x2E, 0x77, 0x78, 0x79, 0x7A))):
+        raise ValueError("시스템/프로그램 단축키와 겹치는 조합입니다")
+    if mode == "hold" and main in (0x1004, 0x1005):
+        raise ValueError("휠은 누르는 동안 유지할 수 없습니다")
+    return key.strip().lower()
+
+
+def _resolved_deck_layout(cfg, overrides=None):
     """Fail closed: no guessed defaults or stale pre-v4 user layouts."""
     user_path = os.path.join(EXE_DIR, "deck_layout.json")
     bundled_path = _data_path("deck_layout.json")
@@ -830,6 +871,7 @@ def _resolved_deck_layout(cfg):
                         if b.get("action", "").startswith("spaceship_power.v_engineering_assignment_")]
                 layout["power_buttons"].extend(lift)
                 page["buttons"] = [b for b in page.get("buttons", []) if b not in lift]
+    overrides = _read_key_overrides() if overrides is None else overrides
     bindings, seen, path = _load_action_bindings(cfg)
     layout["actionmaps_active"] = bool(path)
     # Duplicate XML keys can trigger several actions in the same game context.
@@ -847,14 +889,24 @@ def _resolved_deck_layout(cfg):
             btn.update(keys="esc", unbound=False, keys_source="fixed")
             continue
         act = btn.get("action") or ""
-        key = bindings.get(act, "")
+        custom = overrides.get(btn.get("id"), {})
+        use_override = isinstance(custom, dict) and custom.get("action") == act and bool(custom.get("keys"))
+        key = custom.get("keys", "") if use_override else bindings.get(act, "")
+        btn["override_keys"] = key if use_override else ""
+        if use_override:
+            try:
+                key = _validate_override_key(key, btn.get("mode", "tap"))
+            except (ValueError, TypeError):
+                btn["disabled_reason"] = "저장된 키 확인 필요"
+                continue
         if not key:
             continue
         combo = _combo_id(key)
         if key.lower() in {"w", "a", "s", "d", "q", "e", "space", "up", "down", "left", "right"}:
             btn["disabled_reason"] = "이동 키 제외"
             continue
-        if len(owners.get(combo, set())) > 1:
+        xml_conflict = bool(owners.get(combo, set()) - {act}) if use_override else len(owners.get(combo, set())) > 1
+        if xml_conflict:
             btn["disabled_reason"] = "XML 키 중복 · 확인 필요"
             continue
         if btn.get("mode") == "hold" and combo[1] in (0x1004, 0x1005):
@@ -863,7 +915,15 @@ def _resolved_deck_layout(cfg):
         if btn.get("mode", "tap") not in ("tap", "hold"):
             btn["disabled_reason"] = "지원하지 않는 동작"
             continue
-        btn.update(keys=key, unbound=False, keys_source="actionmaps")
+        btn.update(keys=key, unbound=False, keys_source="override" if use_override else "actionmaps")
+    effective = {}
+    for btn in _deck_buttons(layout):
+        if not btn.get("unbound") and btn.get("keys"):
+            effective.setdefault(_combo_id(btn["keys"]), []).append(btn)
+    for buttons in effective.values():
+        if len({b.get("action") or b.get("id") for b in buttons}) > 1:
+            for btn in buttons:
+                btn.update(keys="", unbound=True, disabled_reason="덱 키 중복 · 확인 필요")
     return layout
 
 
@@ -977,6 +1037,10 @@ def create_app(state, cfg):
         key: str = ""                  # SC 키 표기 (예: "b", "lalt+n", "np_5")
         ms: int = 0                    # timed용 유지 시간 (ms)
 
+    class KeySetting(BaseModel):
+        button_id: str
+        keys: str = ""
+
     class TestInput(BaseModel):
         rs: int | None = None
         minerals: list | None = None
@@ -1028,6 +1092,51 @@ def create_app(state, cfg):
     @app.get("/api/layout")
     def deck_layout():
         return _resolved_deck_layout(cfg)
+
+    @app.get("/api/key-settings")
+    def key_settings(request: Request):
+        deny = _check_pair(request)
+        if deny is not None:
+            return deny
+        return _resolved_deck_layout(cfg)
+
+    @app.post("/api/key-settings")
+    def save_key_setting(body: KeySetting, request: Request):
+        deny = _check_pair(request)
+        if deny is not None:
+            return deny
+        with _KEY_SETTINGS_LOCK:
+            layout = _resolved_deck_layout(cfg)
+            matches = [b for b in _deck_buttons(layout) if b.get("id") == body.button_id]
+            if len(matches) != 1 or not matches[0].get("action") or matches[0].get("blocked_reason"):
+                return JSONResponse({"msg": "이 버튼은 변경할 수 없습니다"}, status_code=400)
+            btn = matches[0]
+            overrides = _read_key_overrides()
+            if body.keys.strip():
+                try:
+                    key = _validate_override_key(body.keys, btn.get("mode", "tap"))
+                except ValueError as e:
+                    return JSONResponse({"msg": str(e)}, status_code=400)
+                overrides[body.button_id] = {"keys": key, "action": btn["action"]}
+                proposed = _resolved_deck_layout(cfg, overrides)
+                candidate = next(b for b in _deck_buttons(proposed) if b.get("id") == body.button_id)
+                if candidate.get("unbound"):
+                    return JSONResponse({"msg": candidate.get("disabled_reason", "키 확인 필요")}, status_code=400)
+            else:
+                overrides.pop(body.button_id, None)
+            try:
+                import tempfile
+                fd, tmp = tempfile.mkstemp(prefix=".deck-keys-", suffix=".json", dir=EXE_DIR)
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        json.dump(overrides, f, ensure_ascii=False, indent=2)
+                    os.replace(tmp, _override_path())
+                finally:
+                    if os.path.exists(tmp):
+                        os.unlink(tmp)
+            except OSError:
+                return JSONResponse({"msg": "PC 설정 저장 실패 · 쓰기 가능한 폴더를 확인하세요"}, status_code=500)
+            return {"ok": True, "layout": _resolved_deck_layout(cfg)}
 
     @app.post("/api/input")
     def tablet_input(body: InputRequest, request: Request):
