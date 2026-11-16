@@ -1623,6 +1623,31 @@ class ControlApp:
                                  corner_radius=10)
         self.pill.pack(side="right", pady=6)
 
+        # Always visible above the scrollable settings, including on short windows.
+        connection = ctk.CTkFrame(self.root, fg_color="#10212b", corner_radius=10,
+                                  border_width=1, border_color="#254958")
+        connection.pack(fill="x", padx=14, pady=(8, 4))
+        ctk.CTkLabel(connection, text="태블릿 접속 주소 · 같은 Wi-Fi", font=self.F_H,
+                     text_color="#b4e5ec").pack(anchor="w", padx=12, pady=(9, 3))
+        self.connection_url = ctk.StringVar(value="")
+        self.connection_entry = ctk.CTkEntry(
+            connection, textvariable=self.connection_url, state="readonly",
+            font=self.F_B, height=32, fg_color="#0a1720", border_color="#254958",
+            text_color="#eef4fa")
+        self.connection_entry.pack(fill="x", padx=12, pady=(0, 5))
+        connection_row = ctk.CTkFrame(connection, fg_color="transparent")
+        connection_row.pack(fill="x", padx=12, pady=(0, 9))
+        self.pair_label = ctk.CTkLabel(connection_row, text="", font=self.F_B,
+                                      text_color="#b4e5ec")
+        self.pair_label.pack(side="left")
+        self.copy_address_button = ctk.CTkButton(
+            connection_row, text="주소 복사", width=82, height=28, font=self.F_B,
+            command=self.copy_connection_address, fg_color="#1b4759",
+            hover_color="#245d74", text_color="#eef4fa")
+        self.copy_address_button.pack(side="right")
+        self._connection_refresh_at = 0
+        self._refresh_connection_address()
+
         self.content = ctk.CTkScrollableFrame(self.root, fg_color="transparent",
                                               scrollbar_button_color="#253746")
         self.content.pack(fill="both", expand=True, padx=0, pady=0)
@@ -1689,12 +1714,6 @@ class ControlApp:
         self.rs_mode_seg.pack(fill="x", padx=14, pady=(2, 10))
         ctk.CTkLabel(card, text="태블릿 덱", font=self.F_SM,
                      text_color="#7e93a6").pack(anchor="w", padx=14)
-        pair_row = ctk.CTkFrame(card, fg_color="transparent")
-        pair_row.pack(fill="x", padx=14, pady=(2, 4))
-        ctk.CTkLabel(pair_row, text="페어링 코드", font=self.F_SM,
-                     text_color="#7e93a6").pack(side="left")
-        ctk.CTkLabel(pair_row, text=str(self.cfg.get("pairing_code") or "-"),
-                     font=self.F_H, text_color="#46c8e6").pack(side="right")
         ctk.CTkButton(card, text="태블릿 덱 열기", command=self.open_web,
                       fg_color="#14202c", hover_color="#1a2c3c",
                       text_color="#dfe9f2", height=30).pack(
@@ -1713,10 +1732,6 @@ class ControlApp:
         self.am_status = ctk.CTkLabel(card, text=_am_txt, font=self.F_SM,
                                      text_color="#5a6b7a")
         self.am_status.pack(anchor="w", padx=14, pady=(0, 2))
-        self.srv_label = ctk.CTkLabel(card, text="", font=self.F_SM,
-                                      text_color="#7e93a6", wraplength=270,
-                                      justify="left", anchor="w")
-        self.srv_label.pack(anchor="w", padx=14, pady=(0, 10))
 
         # ---- 오류 배너
         self.err_banner = ctk.CTkLabel(self.root, text="", font=self.F_SM,
@@ -1730,6 +1745,22 @@ class ControlApp:
         ctk.CTkButton(self.root, text="종료", command=self.quit, width=90,
                       fg_color="transparent", hover_color="#2c1719",
                       text_color="#f28b82", height=28).pack(pady=(6, 10))
+
+    def _refresh_connection_address(self):
+        now = time.monotonic()
+        if now >= self._connection_refresh_at:
+            port = self.cfg.get("port", 8377)
+            self.connection_url.set(f"http://{lan_ip()}:{port}")
+            self._connection_refresh_at = now + 10
+        self.pair_label.configure(text=f"페어링 코드  {self.cfg.get('pairing_code') or '-'}")
+
+    def copy_connection_address(self):
+        self._connection_refresh_at = 0
+        self._refresh_connection_address()
+        self.root.clipboard_clear()
+        self.root.clipboard_append(self.connection_url.get())
+        self.copy_address_button.configure(text="복사됨")
+        self.root.after(1500, lambda: self.copy_address_button.configure(text="주소 복사"))
 
     def _scan_switch(self):
         self.cfg["scan_enabled"] = bool(self.scan_sw.get())
@@ -1911,8 +1942,7 @@ class ControlApp:
         else:
             txt = "캡처 영역 미설정 — Ctrl+Alt+F10으로 지정"
         self.last_scan.configure(text=txt)
-        self.srv_label.configure(
-            text=f"이 PC: http://localhost:{port}\n같은 Wi-Fi: http://{lan_ip()}:{port}")
+        self._refresh_connection_address()
         if LAST_ERROR:
             self.err_banner.configure(text=f"최근 오류: {LAST_ERROR}")
             self.err_banner.pack(padx=14, pady=(10, 0), fill="x",
