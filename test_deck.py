@@ -38,36 +38,85 @@ class DeckTests(unittest.TestCase):
             self.assertEqual(self.client.post('/api/input',headers=self.headers,json={'type':'up','key':'u'}).status_code,200)
     def test_layout_defaults_no_paths(self):
         d=self.client.get('/api/layout').json()
-        self.assertEqual(len(d['pages']),3)
+        self.assertEqual(len(d['pages']),4)
         self.assertNotIn('actionmaps_path',d)
         self.assertFalse(d['actionmaps_active'])
     def test_rebind(self):
-        self.xml('<ActionMaps><actionmap name="seat_general"><action name="v_toggle_mining_mode"><rebind input="kb1_lalt+m"/></action></actionmap></ActionMaps>')
+        self.xml('<ActionMaps><actionmap name="seat_general"><action name="v_set_mining_mode"><rebind input="kb1_lalt+m"/></action></actionmap></ActionMaps>')
         d=self.client.get('/api/layout').json()
         self.assertEqual(d['pages'][0]['buttons'][0]['keys'],'lalt+m')
         self.assertNotIn('actionmaps_path',d)
-    def test_joystick_partial_keeps_default(self):
-        self.xml('<ActionMaps><actionmap name="seat_general"><action name="v_toggle_mining_mode"><rebind input="js1_button7"/></action></actionmap></ActionMaps>')
+    def test_joystick_partial_stays_disabled(self):
+        self.xml('<ActionMaps><actionmap name="seat_general"><action name="v_set_mining_mode"><rebind input="js1_button7"/></action></actionmap></ActionMaps>')
         b=self.client.get('/api/layout').json()['pages'][0]['buttons'][0]
-        self.assertEqual(b['keys'],'m');self.assertFalse(b.get('unbound',False))
+        self.assertEqual(b['keys'],'');self.assertTrue(b['unbound'])
     def test_explicit_unbind(self):
-        self.xml('<ActionMaps><actionmap name="seat_general"><action name="v_toggle_mining_mode"><rebind input="kb1_ "/></action></actionmap></ActionMaps>')
+        self.xml('<ActionMaps><actionmap name="seat_general"><action name="v_set_mining_mode"><rebind input="kb1_ "/></action></actionmap></ActionMaps>')
         b=self.client.get('/api/layout').json()['pages'][0]['buttons'][0]
         self.assertTrue(b['unbound']);self.assertEqual(b['keys'],'')
     def test_invalid_xml(self):
         self.xml('<broken')
         self.assertFalse(self.client.get('/api/layout').json()['actionmaps_active'])
     def test_unsupported_rebind_does_not_override(self):
-        self.xml('<ActionMaps><actionmap name="seat_general"><action name="v_toggle_mining_mode"><rebind input="kb1_HMD_Yaw"/></action></actionmap></ActionMaps>')
-        self.assertEqual(self.client.get('/api/layout').json()['pages'][0]['buttons'][0]['keys'],'m')
+        self.xml('<ActionMaps><actionmap name="seat_general"><action name="v_set_mining_mode"><rebind input="kb1_HMD_Yaw"/></action></actionmap></ActionMaps>')
+        self.assertEqual(self.client.get('/api/layout').json()['pages'][0]['buttons'][0]['keys'],'')
     def test_no_arbitrary_auto_profile(self):
         self.assertIsNone(m._resolve_actionmaps_path({'actionmaps_path':''}))
-    def test_default_keys_parse(self):
-        d=json.loads(Path('deck_layout.json').read_text())
-        for page in d['pages']:
-            for btn in page['buttons']:
-                m._parse_combo(btn['keys'])
-                self.assertNotIn(btn['keys'].lower(),['w','a','s','d'])
+    def test_default_has_no_guessed_keys(self):
+        d=self.client.get('/api/layout').json()
+        self.assertEqual(len(d['common_buttons']),4)
+        for btn in m._deck_buttons(d):
+            if btn['id']=='escape':
+                self.assertEqual(btn['keys'],'esc');self.assertFalse(btn['unbound'])
+            else:
+                self.assertEqual(btn['keys'],'');self.assertTrue(btn['unbound'])
+    def test_server_blocks_missing_key_and_arbitrary_timed(self):
+        with patch.object(m,'_game_focused',return_value=True),patch.object(m,'_send_input',return_value=(True,'ok')) as send:
+            for body in [{'type':'press','key':'u'}, {'type':'timed','key':'esc','ms':5000}, {'type':'down','key':'esc'}]:
+                self.assertEqual(self.client.post('/api/input',headers=self.headers,json=body).status_code,400)
+            send.assert_not_called()
+            self.assertEqual(self.client.post('/api/input',headers=self.headers,json={'type':'press','key':'esc'}).status_code,200)
+    def test_server_accepts_confirmed_mode_only(self):
+        self.xml('<ActionMaps><actionmap name="seat_general"><action name="v_set_mining_mode"><rebind input="kb1_lalt+m"/></action></actionmap></ActionMaps>')
+        with patch.object(m,'_game_focused',return_value=True),patch.object(m,'_send_input',return_value=(True,'ok')) as send:
+            self.assertEqual(self.client.post('/api/input',headers=self.headers,json={'type':'press','key':'lalt+m'}).status_code,200)
+            self.assertEqual(self.client.post('/api/input',headers=self.headers,json={'type':'down','key':'lalt+m'}).status_code,400)
+            self.assertEqual(send.call_count,1)
+    def test_xml_duplicate_keys_disabled(self):
+        self.xml('<ActionMaps><actionmap name="seat_general"><action name="v_set_mining_mode"><rebind input="kb1_lalt+m"/></action><action name="v_set_scan_mode"><rebind input="kb1_lalt+m"/></action></actionmap></ActionMaps>')
+        d=self.client.get('/api/layout').json()
+        for b in d['pages'][0]['buttons'][:2]:
+            self.assertTrue(b['unbound']);self.assertIn('중복',b['disabled_reason'])
+    def test_secondary_xml_binding_collision_also_blocks(self):
+        self.xml('<ActionMaps><actionmap name="seat_general"><action name="v_set_mining_mode"><rebind input="kb1_lalt+m"/></action><action name="v_set_scan_mode"><rebind input="kb1_lalt+v"/><rebind input="kb1_lalt+m"/></action></actionmap></ActionMaps>')
+        b=self.client.get('/api/layout').json()['pages'][0]['buttons'][0]
+        self.assertTrue(b['unbound']);self.assertIn('중복',b['disabled_reason'])
+    def test_bare_movement_key_disabled(self):
+        self.xml('<ActionMaps><actionmap name="seat_general"><action name="v_set_mining_mode"><rebind input="kb1_w"/></action></actionmap></ActionMaps>')
+        b=self.client.get('/api/layout').json()['pages'][0]['buttons'][0]
+        self.assertTrue(b['unbound']);self.assertIn('이동',b['disabled_reason'])
+    def test_no_quantum_or_contextual_inventory_guess(self):
+        d=self.client.get('/api/layout').json()
+        all_buttons=list(m._deck_buttons(d))
+        self.assertFalse(any('quantum' in b.get('action','') for b in all_buttons))
+        for id in ['inventory','exit-seat']:
+            b=next(b for b in all_buttons if b['id']==id)
+            self.assertTrue(b['unbound']);self.assertEqual(b['action'],'')
+    def test_stale_layout_uses_bundled_without_overwriting(self):
+        path=Path(self.tmp.name)/'deck_layout.json'
+        old='{"version":3,"pages":[{"name":"old","buttons":[{"keys":"w"}]}]}'
+        path.write_text(old)
+        with patch.object(m,'EXE_DIR',self.tmp.name):
+            d=self.client.get('/api/layout').json()
+        self.assertEqual(d['version'],4);self.assertIn('migration_notice',d)
+        self.assertEqual(path.read_text(),old)
+    def test_xml_removed_revokes_input(self):
+        self.xml('<ActionMaps><actionmap name="seat_general"><action name="v_set_mining_mode"><rebind input="kb1_lalt+m"/></action></actionmap></ActionMaps>')
+        self.assertFalse(self.client.get('/api/layout').json()['pages'][0]['buttons'][0]['unbound'])
+        self.cfg['actionmaps_path']=''
+        with patch.object(m,'_game_focused',return_value=True),patch.object(m,'_send_input') as send:
+            self.assertEqual(self.client.post('/api/input',headers=self.headers,json={'type':'press','key':'lalt+m'}).status_code,400)
+            send.assert_not_called()
     def test_invalid_combo(self):
         for key in ['bad','mouse9','w+s','']:
             with self.assertRaises(ValueError):m._parse_combo(key)

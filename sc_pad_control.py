@@ -1,7 +1,7 @@
 """SC 패드 컨트롤 (SC_PadControl) - 단일 파일 버전.
 
 Star Citizen 광물 스캔 결과를 화면 위에 표시하는 로컬 오버레이.
-화면 캡처 + OCR만 사용 (인젝션/메모리 읽기 없음, EAC 안전 범위).
+화면 캡처 + OCR만 사용. 게임 정책 및 안티치트 호환성은 보장하지 않습니다.
 
 실행: python sc_pad_control.py  (또는 빌드된 SC_PadControl.exe)
 """
@@ -56,7 +56,7 @@ DEFAULTS = {
     "only_when_game_focused": True,  # SC가 최전면 창일 때만 입력 전송
     "hold_timeout_ms": 5000,      # 홀드 무응답 자동 해제 (stuck 키 방지)
     "tap_ms": 60,                 # 탭 1회의 키 눌림 길이
-    "actionmaps_path": "",        # 사용자가 고른 SC 프로필/내보내기 XML (빈 값=기본 키)
+    "actionmaps_path": "",        # 사용자가 고른 SC 프로필/내보내기 XML (빈 값=키 지정 필요)
 }
 
 
@@ -710,9 +710,8 @@ def _game_focused():
 
 
 # --- actionmaps.xml 연동: 인게임 리바인드를 덱 키에 반영 -------------------
-# 게임 프로필 파일을 읽기만 한다 (쓰기 없음). 파일이 없거나 액션이 없으면
-# deck_layout.json의 기본 키를 그대로 사용.
-_AM_CACHE = {"path": None, "mtime": 0.0, "map": {}, "seen": set()}
+# 게임 프로필 파일을 읽기만 한다 (쓰기 없음). 파일이나 바인딩이 없으면 비활성화.
+_AM_CACHE = {"path": None, "mtime": 0.0, "map": {}, "seen": set(), "owners": {}}
 
 
 def _resolve_actionmaps_path(cfg):
@@ -748,8 +747,7 @@ def _load_action_bindings(cfg):
     """
     path = _resolve_actionmaps_path(cfg)
     if not path:
-        if _AM_CACHE["path"]:
-            _AM_CACHE.update({"path": None, "mtime": 0.0, "map": {}, "seen": set()})
+        _AM_CACHE.update({"path": None, "mtime": 0.0, "map": {}, "seen": set(), "owners": {}})
         return {}, set(), None
     try:
         mt = os.path.getmtime(path)
@@ -757,7 +755,7 @@ def _load_action_bindings(cfg):
         return {}, set(), None
     if _AM_CACHE["path"] == path and _AM_CACHE["mtime"] == mt:
         return _AM_CACHE["map"], _AM_CACHE["seen"], path
-    bindings, seen = {}, set()
+    bindings, seen, owners = {}, set(), {}
     try:
         import xml.etree.ElementTree as ET
         if os.path.getsize(path) > 2 * 1024 * 1024:
@@ -782,13 +780,81 @@ def _load_action_bindings(cfg):
                                 _parse_combo(conv)
                             except ValueError:
                                 continue
-                            bindings[amn + "." + an] = conv
-                            break
+                            act_id = amn + "." + an
+                            owners.setdefault(_combo_id(conv), set()).add(act_id)
+                            if not bindings.get(act_id):
+                                bindings[act_id] = conv
     except Exception as e:
         print(f"[deck] actionmaps 읽기 실패: {e}")
         return {}, set(), None
-    _AM_CACHE.update({"path": path, "mtime": mt, "map": bindings, "seen": seen})
+    _AM_CACHE.update({"path": path, "mtime": mt, "map": bindings, "seen": seen, "owners": owners})
     return bindings, seen, path
+
+
+def _combo_id(key):
+    mods, main = _parse_combo(key)
+    return tuple(sorted(set(mods))), main
+
+
+def _deck_buttons(layout):
+    yield from layout.get("common_buttons", [])
+    for page in layout.get("pages", []):
+        yield from page.get("buttons", [])
+
+
+def _resolved_deck_layout(cfg):
+    """Fail closed: no guessed defaults or stale pre-v4 user layouts."""
+    user_path = os.path.join(EXE_DIR, "deck_layout.json")
+    bundled_path = _data_path("deck_layout.json")
+    p = user_path if os.path.exists(user_path) else bundled_path
+    try:
+        with open(p, encoding="utf-8") as f:
+            layout = json.load(f)
+        if not isinstance(layout, dict):
+            raise ValueError("레이아웃 형식 오류")
+        if layout.get("version", 0) < 4:
+            with open(bundled_path, encoding="utf-8") as f:
+                layout = json.load(f)
+            layout["migration_notice"] = "이전 덱 파일은 보존하고 새 안전 레이아웃을 사용합니다"
+            if layout.get("version", 0) < 4:
+                raise ValueError("v4 이상 레이아웃 필요")
+    except Exception:
+        return {"pages": [], "common_buttons": [], "error": "덱 파일을 확인하세요"}
+    bindings, seen, path = _load_action_bindings(cfg)
+    layout["actionmaps_active"] = bool(path)
+    # Duplicate XML keys can trigger several actions in the same game context.
+    # Do not infer contexts or treat a new key as safe just because it parses.
+    owners = _AM_CACHE.get("owners", {}) if path else {}
+    for btn in _deck_buttons(layout):
+        btn["keys"] = ""
+        btn["unbound"] = True
+        btn["keys_source"] = "unverified"
+        btn["disabled_reason"] = btn.get("blocked_reason") or "키 지정 필요"
+        if btn.get("blocked_reason"):
+            continue
+        # ESC is an explicitly labeled literal system key, not a game bind.
+        if btn.get("id") == "escape" and btn.get("fixed_key") == "esc":
+            btn.update(keys="esc", unbound=False, keys_source="fixed")
+            continue
+        act = btn.get("action") or ""
+        key = bindings.get(act, "")
+        if not key:
+            continue
+        combo = _combo_id(key)
+        if key.lower() in {"w", "a", "s", "d", "q", "e", "space", "up", "down", "left", "right"}:
+            btn["disabled_reason"] = "이동 키 제외"
+            continue
+        if len(owners.get(combo, set())) > 1:
+            btn["disabled_reason"] = "XML 키 중복 · 확인 필요"
+            continue
+        if btn.get("mode") == "hold" and combo[1] in (0x1004, 0x1005):
+            btn["disabled_reason"] = "휠 홀드 불가"
+            continue
+        if btn.get("mode", "tap") not in ("tap", "hold"):
+            btn["disabled_reason"] = "지원하지 않는 동작"
+            continue
+        btn.update(keys=key, unbound=False, keys_source="actionmaps")
+    return layout
 
 
 def _send_input(action: str, key: str, ms: int = 0):
@@ -951,32 +1017,7 @@ def create_app(state, cfg):
 
     @app.get("/api/layout")
     def deck_layout():
-        """덱 레이아웃 JSON. exe 옆 deck_layout.json이 있으면 그것을 우선.
-        actionmaps.xml이 발견되면 action이 있는 버튼의 키를 인게임 바인딩으로 교체."""
-        user_path = os.path.join(EXE_DIR, "deck_layout.json")
-        p = user_path if os.path.exists(user_path) else _data_path("deck_layout.json")
-        if not p:
-            return JSONResponse({"pages": []})
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                layout = json.load(f)
-        except Exception as e:
-            return JSONResponse({"pages": [], "error": str(e)}, status_code=500)
-        bindings, seen, am_path = _load_action_bindings(cfg)
-        layout["actionmaps_active"] = bool(am_path)
-        if am_path:
-            for page in layout.get("pages", []):
-                for btn in page.get("buttons", []):
-                    act = btn.get("action") or ""
-                    if not act:
-                        continue
-                    if act in bindings:
-                        btn["keys"] = bindings[act]
-                        btn["keys_source"] = "actionmaps"
-                        btn["unbound"] = not bool(bindings[act])
-                    elif act in seen:
-                        btn["keys_source"] = "default_unverified"
-        return layout
+        return _resolved_deck_layout(cfg)
 
     @app.post("/api/input")
     def tablet_input(body: InputRequest, request: Request):
@@ -991,6 +1032,25 @@ def create_app(state, cfg):
             return JSONResponse(
                 {"ok": False, "error": "game_not_focused",
                  "msg": "게임 창이 앞에 있을 때만 전송됨"}, status_code=409)
+        if action not in ("up", "release"):
+            layout = _resolved_deck_layout(cfg)
+            allowed = False
+            try:
+                combo = _combo_id(body.key)
+                for btn in _deck_buttons(layout):
+                    if btn.get("unbound") or not btn.get("keys"):
+                        continue
+                    if _combo_id(btn["keys"]) != combo:
+                        continue
+                    mode = btn.get("mode", "tap")
+                    if ((mode == "tap" and action in ("press", "tap")) or
+                            (mode == "hold" and action in ("down", "refresh"))):
+                        allowed = True
+                        break
+            except ValueError:
+                pass
+            if not allowed:
+                return JSONResponse({"ok": False, "msg": "키 지정 필요 또는 허용되지 않은 입력"}, status_code=400)
         ok, msg = _send_input(action, body.key, body.ms)
         return JSONResponse({"ok": ok, "msg": msg}, status_code=200 if ok else 400)
 
@@ -1639,7 +1699,7 @@ class ControlApp:
                       text_color="#dfe9f2", height=30).pack(fill="x", padx=14, pady=(0, 4))
         _am_b, _am_s, _am_p = _load_action_bindings(self.cfg)
         _am_txt = ("키바인드: actionmaps.xml 추적 중" if _am_p
-                   else "키바인드: 기본 레이아웃 (actionmaps 없음)")
+                   else "키바인드: XML 선택 필요 (ESC 외 입력 차단)")
         self.am_status = ctk.CTkLabel(card, text=_am_txt, font=self.F_SM,
                                      text_color="#5a6b7a")
         self.am_status.pack(anchor="w", padx=14, pady=(0, 2))
@@ -1746,7 +1806,7 @@ class ControlApp:
             save_config(self.cfg)
             _, _, active = _load_action_bindings(self.cfg)
             self.am_status.configure(text="키바인드: 선택한 XML 연결됨" if active
-                                     else "키바인드: XML 확인 실패 (기본 키 사용)")
+                                     else "키바인드: XML 확인 실패 (입력 잠금)")
             from tkinter import messagebox
             messagebox.showinfo("키바인드", "선택을 저장했습니다. 태블릿 페이지를 새로고침하세요.",
                                 parent=self.root)
