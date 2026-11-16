@@ -11,6 +11,8 @@ with tempfile.TemporaryDirectory() as tmp, sync_playwright() as p:
  # Deliberately small synthetic XML fixture, not the user's profile or game defaults.
  xml=Path(tmp)/'test.xml'
  xml.write_text('<ActionMaps><actionmap name="seat_general"><action name="v_set_mining_mode"><rebind input="kb1_lalt+m"/></action></actionmap><actionmap name="spaceship_radar"><action name="v_invoke_ping"><rebind input="kb1_tab"/></action></actionmap></ActionMaps>')
+ text=xml.read_text().replace('</ActionMaps>','<actionmap name="spaceship_power"><action name="v_engineering_assignment_weapons_increase"><rebind input="kb1_f5"/></action></actionmap></ActionMaps>')
+ xml.write_text(text)
  layout=[m._resolved_deck_layout({'actionmaps_path':str(xml)})]
  b=p.chromium.launch(headless=True)
  page=b.new_page(viewport={'width':1024,'height':768})
@@ -28,6 +30,18 @@ with tempfile.TemporaryDirectory() as tmp, sync_playwright() as p:
  page.goto('http://deck.test/');page.wait_for_selector('#grid button')
  assert page.locator('#tabs button').count()==4
  assert page.locator('#common button').count()==4
+ assert page.locator('#powerControls button').count()==7
+ for i in range(4):
+  page.locator('#tabs button').nth(i).click()
+  assert page.locator('#powerControls button').count()==7
+  page.locator('[data-id="weapons-increase"]').click();page.wait_for_timeout(50)
+  assert requests[-1][1]=={'type':'press','key':'f5','ms':0}
+ requests.clear()
+ page.locator('#tabs button').nth(0).click()
+ page.evaluate('window.scrollTo(0,400)')
+ assert abs(page.locator('#powerTop').bounding_box()['y'])<1
+ assert page.locator('[data-id="weapons-increase"]').bounding_box()['y']>=0
+ page.evaluate('window.scrollTo(0,0)')
  assert page.locator('[data-id="laser"]').is_disabled()
  page.locator('[data-id="mining-mode"]').click();page.wait_for_timeout(80)
  assert [x[1]['type'] for x in requests]==['press'],requests
@@ -40,10 +54,11 @@ with tempfile.TemporaryDirectory() as tmp, sync_playwright() as p:
  for i in range(10):
   page.get_by_role('button',name='조종·착륙',exact=True).click()
   page.get_by_role('button',name='채굴',exact=True).click()
- assert page.evaluate('S.releases.length')==3
+ assert page.evaluate('S.releases.length')==4
  # No XML means only the literal ESC button is enabled, including after reload.
  layout[0]=m._resolved_deck_layout({})
  page.reload();page.wait_for_selector('#grid button')
+ assert page.locator('#powerControls button:not(:disabled)').count()==0
  assert page.locator('#grid button:not(:disabled)').count()==0
  assert page.locator('#common button:not(:disabled)').count()==1
  auth[0]=401;page.reload();page.wait_for_selector('#pairOverlay.show')
@@ -53,5 +68,5 @@ with tempfile.TemporaryDirectory() as tmp, sync_playwright() as p:
  auth[0]=200;page.locator('#pairGo').click();page.wait_for_timeout(80)
  assert not page.locator('#pairOverlay').evaluate("e=>e.classList.contains('show')")
  assert not errors,errors
- print('frontend checks: 4 pages, common row, disabled missing binds, single tap, one hold release, bounded listeners, no-XML fail closed, pairing failure/success; JS errors: 0')
+ print('frontend checks: sticky power controls on all 4 pages, power tap uses XML key, missing power binds locked, common row, disabled missing binds, single tap, one hold release, bounded listeners, no-XML fail closed, pairing failure/success; JS errors: 0')
  b.close()

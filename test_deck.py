@@ -117,6 +117,28 @@ class DeckTests(unittest.TestCase):
         with patch.object(m,'_game_focused',return_value=True),patch.object(m,'_send_input') as send:
             self.assertEqual(self.client.post('/api/input',headers=self.headers,json={'type':'press','key':'lalt+m'}).status_code,400)
             send.assert_not_called()
+    def test_power_top_is_xml_only_and_server_validated(self):
+        self.xml('<ActionMaps><actionmap name="spaceship_power"><action name="v_engineering_assignment_weapons_increase"><rebind input="kb1_f5"/></action></actionmap></ActionMaps>')
+        d=self.client.get('/api/layout').json()
+        self.assertEqual(len(d['power_buttons']),7)
+        self.assertEqual(len(next(p for p in d['pages'] if p['id']=='power')['buttons']),5)
+        b=next(b for b in d['power_buttons'] if b['id']=='weapons-increase')
+        self.assertFalse(b['unbound']);self.assertEqual(b['keys'],'f5')
+        self.assertTrue(next(b for b in d['power_buttons'] if b['id']=='engine-increase')['unbound'])
+        with patch.object(m,'_game_focused',return_value=True),patch.object(m,'_send_input',return_value=(True,'ok')) as send:
+            self.assertEqual(self.client.post('/api/input',headers=self.headers,json={'type':'press','key':'f5'}).status_code,200)
+            self.assertEqual(self.client.post('/api/input',headers=self.headers,json={'type':'press','key':'f6'}).status_code,400)
+            self.assertEqual(send.call_count,1)
+    def test_existing_v4_distribution_is_lifted_without_write(self):
+        d=json.loads(Path('deck_layout.json').read_text())
+        buttons=d.pop('power_buttons')
+        next(p for p in d['pages'] if p['id']=='power')['buttons'][:0]=buttons
+        path=Path(self.tmp.name)/'deck_layout.json';text=json.dumps(d);path.write_text(text)
+        with patch.object(m,'EXE_DIR',self.tmp.name):
+            resolved=self.client.get('/api/layout').json()
+        self.assertEqual(len(resolved['power_buttons']),7)
+        self.assertFalse(any(b.get('group')=='출력 배분' for p in resolved['pages'] for b in p['buttons']))
+        self.assertEqual(path.read_text(),text)
     def test_invalid_combo(self):
         for key in ['bad','mouse9','w+s','']:
             with self.assertRaises(ValueError):m._parse_combo(key)

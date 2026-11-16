@@ -233,64 +233,8 @@
     {
       "id": "power",
       "name": "전력·시스템",
-      "description": "출력 배분과 전원 전환을 분리했습니다",
+      "description": "출력 배분은 모든 페이지 최상단 · 전원 전환은 아래 별도 구역",
       "buttons": [
-        {
-          "id": "weapons-increase",
-          "label": "무기 출력 +",
-          "action": "spaceship_power.v_engineering_assignment_weapons_increase",
-          "group": "출력 배분",
-          "mode": "tap",
-          "keys": ""
-        },
-        {
-          "id": "weapons-decrease",
-          "label": "무기 출력 −",
-          "action": "spaceship_power.v_engineering_assignment_weapons_decrease",
-          "group": "출력 배분",
-          "mode": "tap",
-          "keys": ""
-        },
-        {
-          "id": "engine-increase",
-          "label": "엔진 출력 +",
-          "action": "spaceship_power.v_engineering_assignment_engine_increase",
-          "group": "출력 배분",
-          "mode": "tap",
-          "keys": ""
-        },
-        {
-          "id": "engine-decrease",
-          "label": "엔진 출력 −",
-          "action": "spaceship_power.v_engineering_assignment_engine_decrease",
-          "group": "출력 배분",
-          "mode": "tap",
-          "keys": ""
-        },
-        {
-          "id": "shields-increase",
-          "label": "실드 출력 +",
-          "action": "spaceship_power.v_engineering_assignment_shields_increase",
-          "group": "출력 배분",
-          "mode": "tap",
-          "keys": ""
-        },
-        {
-          "id": "shields-decrease",
-          "label": "실드 출력 −",
-          "action": "spaceship_power.v_engineering_assignment_shields_decrease",
-          "group": "출력 배분",
-          "mode": "tap",
-          "keys": ""
-        },
-        {
-          "id": "power-reset",
-          "label": "출력 초기화",
-          "action": "spaceship_power.v_engineering_assignment_reset",
-          "group": "출력 배분",
-          "mode": "tap",
-          "keys": ""
-        },
         {
           "id": "power-all",
           "label": "전체 전원 전환",
@@ -412,6 +356,64 @@
           "keys": ""
         }
       ]
+    }
+  ],
+  "power_buttons": [
+    {
+      "id": "weapons-increase",
+      "label": "무기 출력 +",
+      "action": "spaceship_power.v_engineering_assignment_weapons_increase",
+      "group": "출력 배분",
+      "mode": "tap",
+      "keys": ""
+    },
+    {
+      "id": "weapons-decrease",
+      "label": "무기 출력 −",
+      "action": "spaceship_power.v_engineering_assignment_weapons_decrease",
+      "group": "출력 배분",
+      "mode": "tap",
+      "keys": ""
+    },
+    {
+      "id": "engine-increase",
+      "label": "엔진 출력 +",
+      "action": "spaceship_power.v_engineering_assignment_engine_increase",
+      "group": "출력 배분",
+      "mode": "tap",
+      "keys": ""
+    },
+    {
+      "id": "engine-decrease",
+      "label": "엔진 출력 −",
+      "action": "spaceship_power.v_engineering_assignment_engine_decrease",
+      "group": "출력 배분",
+      "mode": "tap",
+      "keys": ""
+    },
+    {
+      "id": "shields-increase",
+      "label": "실드 출력 +",
+      "action": "spaceship_power.v_engineering_assignment_shields_increase",
+      "group": "출력 배분",
+      "mode": "tap",
+      "keys": ""
+    },
+    {
+      "id": "shields-decrease",
+      "label": "실드 출력 −",
+      "action": "spaceship_power.v_engineering_assignment_shields_decrease",
+      "group": "출력 배분",
+      "mode": "tap",
+      "keys": ""
+    },
+    {
+      "id": "power-reset",
+      "label": "출력 초기화",
+      "action": "spaceship_power.v_engineering_assignment_reset",
+      "group": "출력 배분",
+      "mode": "tap",
+      "keys": ""
     }
   ]
 }

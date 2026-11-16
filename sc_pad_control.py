@@ -797,6 +797,7 @@ def _combo_id(key):
 
 
 def _deck_buttons(layout):
+    yield from layout.get("power_buttons", [])
     yield from layout.get("common_buttons", [])
     for page in layout.get("pages", []):
         yield from page.get("buttons", [])
@@ -820,6 +821,15 @@ def _resolved_deck_layout(cfg):
                 raise ValueError("v4 이상 레이아웃 필요")
     except Exception:
         return {"pages": [], "common_buttons": [], "error": "덱 파일을 확인하세요"}
+    # Lift distribution controls even in existing customized v4 layouts.
+    if "power_buttons" not in layout:
+        layout["power_buttons"] = []
+        for page in layout.get("pages", []):
+            if page.get("id") == "power":
+                lift = [b for b in page.get("buttons", [])
+                        if b.get("action", "").startswith("spaceship_power.v_engineering_assignment_")]
+                layout["power_buttons"].extend(lift)
+                page["buttons"] = [b for b in page.get("buttons", []) if b not in lift]
     bindings, seen, path = _load_action_bindings(cfg)
     layout["actionmaps_active"] = bool(path)
     # Duplicate XML keys can trigger several actions in the same game context.

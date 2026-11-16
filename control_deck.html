@@ -28,7 +28,7 @@
   #common { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; padding:0 14px 10px; border-bottom:1px solid var(--line); }
   #common .btn { min-height:65px; background:#111e2a; }
   #common .lbl { font-size:14px; }
-  #tabs { position:sticky; top:0; z-index:2; background:var(--bg); padding-bottom:8px; }
+  #tabs { background:var(--bg); padding-bottom:8px; }
   #pageHeading { display:flex; align-items:center; justify-content:space-between; padding:10px 14px 0; gap:8px; }
   #pageName { margin:0; font-size:20px; font-weight:600; }
   #pageDescription { margin:5px 0 0; font-size:12px; color:var(--dim); }
@@ -74,19 +74,6 @@
   #pairGo { padding:12px 40px; font-size:15px; background:var(--accent);
             color:#03222b; border:none; border-radius:10px; font-weight:600; }
   #pairMsg { font-size:12px; color:#ff5f5f; min-height:16px; }
-  @media (min-width:700px) {
-    #grid.power { display:grid; grid-template-columns:1.4fr 1fr; gap:0 16px; align-items:start; }
-    #grid.power .group:first-child { grid-row:1 / 3; }
-    #grid.power .group:first-child .group-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
-    #grid.power .caution-zone .group-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
-    #grid.power [data-id="weapons-increase"] { grid-area:1 / 1; }
-    #grid.power [data-id="engine-increase"] { grid-area:1 / 2; }
-    #grid.power [data-id="shields-increase"] { grid-area:1 / 3; }
-    #grid.power [data-id="weapons-decrease"] { grid-area:2 / 1; }
-    #grid.power [data-id="engine-decrease"] { grid-area:2 / 2; }
-    #grid.power [data-id="shields-decrease"] { grid-area:2 / 3; }
-    #grid.power [data-id="power-reset"] { grid-column:1 / -1; min-height:65px; }
-  }
   @media (min-width:521px) and (max-height:800px) {
     .btn { min-height:92px; }
     #common .btn { min-height:52px; }
@@ -94,7 +81,29 @@
     #pageHeading { padding-top:4px; }
     .group-title { margin-top:12px; }
   }
+  #powerTop { position:sticky; top:0; z-index:3; background:#0c1821;
+    border-bottom:1px solid #2b5868; padding:10px 14px 12px; box-shadow:0 5px 18px #0005; }
+  .power-heading { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px; }
+  .power-heading h2 { margin:0; font-size:16px; color:#b4e5ec; }
+  #powerHint { font-size:11px; color:var(--dim); }
+  #powerControls { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)) 0.8fr; gap:8px; }
+  #powerControls .btn { min-height:60px; background:#10212e; border-color:#234352; }
+  #powerControls .lbl { font-size:15px; }
+  #powerControls [data-id="weapons-increase"] { grid-area:1 / 1; }
+  #powerControls [data-id="engine-increase"] { grid-area:1 / 2; }
+  #powerControls [data-id="shields-increase"] { grid-area:1 / 3; }
+  #powerControls [data-id="weapons-decrease"] { grid-area:2 / 1; }
+  #powerControls [data-id="engine-decrease"] { grid-area:2 / 2; }
+  #powerControls [data-id="shields-decrease"] { grid-area:2 / 3; }
+  #powerControls [data-id="power-reset"] { grid-area:1 / 4 / 3 / 5; }
   @media (max-width:520px) {
+    #powerTop { padding:8px 10px; }
+    #powerControls { grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; }
+    #powerControls .btn { min-height:52px; padding:5px 2px; }
+    #powerControls .lbl { font-size:13px; }
+    #powerControls .key { font-size:9px; }
+    #powerControls [data-id="power-reset"] { grid-area:3 / 1 / 4 / 4; min-height:42px; }
+    .power-heading h2 { font-size:14px; } #powerHint { font-size:10px; }
     .group-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
     #common { gap:5px; } #common .lbl { font-size:12px; } #common .key { font-size:9px; }
     .tab { font-size:12px; padding:10px 2px; }
@@ -108,6 +117,10 @@
   <h1>SC 컨트롤 덱</h1>
   <span id="focusBadge"></span>
 </header>
+<section id="powerTop" aria-label="전력 배분 공통 조작">
+  <div class="power-heading"><h2>전력 배분</h2><span id="powerHint">무기 · 엔진 · 실드</span></div>
+  <div id="powerControls"></div>
+</section>
 <div id="deckStatus" role="status"></div>
 <div id="common" aria-label="공통 바로가기"></div>
 <nav id="tabs" aria-label="덱 페이지"></nav>
@@ -222,6 +235,11 @@ function render() {
   status.className = L.actionmaps_active ? 'ready' : '';
   status.textContent = L.actionmaps_active ? 'XML 연결됨 · 연결된 키도 게임에서 현재 프로필과 확인하세요. 중복·미지정 키는 입력하지 않습니다.' : 'PC에서 키바인드 XML을 선택하세요. 확인되지 않은 버튼은 키 지정 필요로 잠깁니다. ESC는 고정 키입니다.';
   if (L.migration_notice) status.textContent += ' · ' + L.migration_notice;
+  const powerControls = document.getElementById('powerControls');
+  powerControls.replaceChildren();
+  (L.power_buttons || []).forEach(b => powerControls.appendChild(makeButton(b)));
+  const connected = (L.power_buttons || []).filter(b => !b.unbound && b.keys).length;
+  document.getElementById('powerHint').textContent = connected + ' / ' + (L.power_buttons || []).length + ' 키 연결 · 상태 표시 아님';
   const common = document.getElementById('common');
   common.replaceChildren();
   (L.common_buttons || []).forEach(b => common.appendChild(makeButton(b)));
