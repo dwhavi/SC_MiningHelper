@@ -195,6 +195,18 @@ class DeckTests(unittest.TestCase):
         with patch.object(m.sys,'platform','win32'),patch.object(m,'_emit_vk') as emit,patch.object(m.time,'sleep'):
             self.assertTrue(m._send_input('press','lalt+mouse1')[0])
             self.assertEqual([c.args for c in emit.call_args_list],[(164,0),(4097,0),(4097,2),(164,2)])
+    def test_tap_uses_human_like_timing(self):
+        events=[]
+        def emit(vk,flags=0): events.append(('key',vk,flags))
+        def sleep(s): events.append(('sleep',round(s,3)))
+        with patch.object(m.sys,'platform','win32'),patch.object(m,'_emit_vk',side_effect=emit),patch.object(m.time,'sleep',side_effect=sleep):
+            self.assertTrue(m._send_input('press','ralt+r')[0])
+        keys=[(e[1],e[2]) for e in events if e[0]=='key']
+        self.assertEqual(keys,[(165,0),(82,0),(82,2),(165,2)])
+        main_down=events.index(('key',82,0))
+        self.assertTrue(any(e[0]=='sleep' and e[1]>=m._TAP_SETTLE for e in events[:main_down]))
+        sleeps=[e[1] for e in events if e[0]=='sleep']
+        self.assertGreaterEqual(sum(sleeps),m._TAP_HOLD+m._TAP_SETTLE)
     def test_hold_is_not_auto_repeat(self):
         with patch.object(m.sys,'platform','win32'),patch.object(m,'_emit_vk') as emit:
             m._send_input('down','u');m._send_input('down','u');m._send_input('refresh','u');m._send_input('up','u')

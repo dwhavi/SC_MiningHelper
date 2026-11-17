@@ -631,13 +631,27 @@ def _emit_vk(vk, flags=0):
         raise OSError("Windows가 입력 전송을 거부했습니다. 게임과 실행 권한을 확인하세요.")
 
 
+# 입력 타이밍 — 사람의 눌림에 가깝게. SC는 입력 상태를 프레임 단위로 읽고
+# 오른쪽 Alt 조합을 특히 자주 놓친다. 수식자 직후 바로 본키를 보내고 60ms 만에
+# 모두 놓는 짧은 합성 탭은 무시되기 쉬우므로, 수식자를 잠깐 안정시키고 본키를
+# 충분히 유지한다. 그래도 탭 1회 = 눌림 1회다 (반복·매크로 없음).
+_KEY_EVENT_GAP = 0.02   # 연속 키 이벤트 사이 최소 간격
+_TAP_SETTLE = 0.03      # 수식자를 누른 뒤 본키까지 안정화 대기
+_TAP_HOLD = 0.12        # 본키 유지 시간 (SC 프레임 2~3개를 확실히 건너도록)
+
+
 def _combo_down(key_name):
     mods, main = _parse_combo(key_name)
     pressed = []
     try:
-        for vk in mods + [main]:
+        for vk in mods:
             _emit_vk(vk, 0)
             pressed.append(vk)
+            time.sleep(_KEY_EVENT_GAP)
+        if mods:
+            time.sleep(_TAP_SETTLE)
+        _emit_vk(main, 0)
+        pressed.append(main)
     except Exception:
         for vk in reversed(pressed):
             try:
@@ -655,6 +669,7 @@ def _combo_up(key_name):
             _emit_vk(vk, 2)
         except Exception as exc:
             first_error = first_error or exc
+        time.sleep(_KEY_EVENT_GAP)
     if first_error is not None:
         raise first_error
 
@@ -662,7 +677,7 @@ def _combo_up(key_name):
 def _combo_press(key_name):
     _combo_down(key_name)
     try:
-        time.sleep(0.06)
+        time.sleep(_TAP_HOLD)
     finally:
         _combo_up(key_name)
 
