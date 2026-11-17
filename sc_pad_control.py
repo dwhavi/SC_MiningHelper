@@ -589,6 +589,37 @@ def _parse_combo(name: str):
     return mods, main
 
 
+# Physical Set-1 modifier positions, independent of the sender's IME/layout.
+_PHYSICAL_MODIFIERS = {0xA0: (0x2A, False), 0xA1: (0x36, False),
+                       0xA2: (0x1D, False), 0xA3: (0x1D, True),
+                       0xA4: (0x38, False), 0xA5: (0x38, True)}
+_INPUT_TRACE_LOCK = threading.Lock()
+
+
+def _keyboard_scan(vk, flags, mapper):
+    if vk in _PHYSICAL_MODIFIERS:
+        scan, extended = _PHYSICAL_MODIFIERS[vk]
+    else:
+        mapped = mapper(vk, 4)
+        scan, extended = mapped & 0xFF, (mapped >> 8) == 0xE0
+        if not scan or mapped >> 8 not in (0, 0xE0):
+            raise ValueError(f"키 스캔코드 변환 실패: VK={vk:02X}")
+    return scan, 0x0008 | flags | (0x0001 if extended else 0)
+
+
+def _trace_input(**record):
+    """Only app-generated input, never physical keyboard capture. Bounded local log."""
+    try:
+        with _INPUT_TRACE_LOCK:
+            path = os.path.join(EXE_DIR, "input_diagnostics.jsonl")
+            if os.path.exists(path) and os.path.getsize(path) > 256 * 1024:
+                os.replace(path, path + ".1")
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(dict(time=time.strftime("%Y-%m-%dT%H:%M:%S"), **record), ensure_ascii=False) + "\n")
+    except OSError:
+        pass  # Diagnostics must not prevent a release event.
+
+
 def _emit_vk(vk, flags=0):
     """Windows SendInput: scan-code keys and single mouse button/wheel events."""
     import ctypes
@@ -623,12 +654,23 @@ def _emit_vk(vk, flags=0):
             down, up = {0x1001:(2,4), 0x1002:(8,16), 0x1003:(32,64)}[vk]
             inp.u.mi = MOUSEINPUT(0, 0, 0, up if flags else down, 0, 0)
     else:
-        scan = u32.MapVirtualKeyW(vk, 4)
-        extended = 1 if scan & 0xFF00 else 0
+        u32.MapVirtualKeyW.argtypes = [wintypes.UINT, wintypes.UINT]
+        u32.MapVirtualKeyW.restype = wintypes.UINT
+        try:
+            scan, event_flags = _keyboard_scan(vk, flags, u32.MapVirtualKeyW)
+        except ValueError as e:
+            _trace_input(vk=vk, error=str(e), result=0)
+            raise
         inp.type = 1
-        inp.u.ki = KEYBDINPUT(0, scan & 0xFF, 0x0008 | flags | extended, 0, 0)
-    if u32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT)) != 1:
-        raise OSError("Windows가 입력 전송을 거부했습니다. 게임과 실행 권한을 확인하세요.")
+        inp.u.ki = KEYBDINPUT(0, scan, event_flags, 0, 0)
+    ctypes.set_last_error(0)
+    sent = u32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+    error = ctypes.get_last_error() if sent != 1 else 0
+    _trace_input(vk=vk, scan=inp.u.ki.wScan if inp.type == 1 else None,
+                 flags=inp.u.ki.dwFlags if inp.type == 1 else flags,
+                 result=sent, win_error=error)
+    if sent != 1:
+        raise OSError(f"Windows가 입력 전송을 거부했습니다 (오류 {error}). 게임과 실행 권한을 확인하세요.")
 
 
 # 입력 타이밍 — 사람의 눌림에 가깝게. SC는 입력 상태를 프레임 단위로 읽고
@@ -1073,7 +1115,7 @@ def _resolved_deck_layout(cfg, overrides=None):
             continue
         act = btn.get("action") or ""
         custom = overrides.get(btn.get("id"), {})
-        use_override = isinstance(custom, dict) and custom.get("action") == act and bool(custom.get("keys"))
+        use_override = not btn.get("xml_only") and isinstance(custom, dict) and custom.get("action") == act and bool(custom.get("keys"))
         key = custom.get("keys", "") if use_override else bindings.get(act, "")
         btn["override_keys"] = key if use_override else ""
         if use_override:
@@ -1318,7 +1360,7 @@ def create_app(state, cfg):
         with _KEY_SETTINGS_LOCK:
             layout = _resolved_deck_layout(cfg)
             matches = [b for b in _deck_buttons(layout) if b.get("id") == body.button_id]
-            if len(matches) != 1 or matches[0].get("blocked_reason"):
+            if len(matches) != 1 or matches[0].get("blocked_reason") or matches[0].get("xml_only"):
                 return JSONResponse({"msg": "이 버튼은 변경할 수 없습니다"}, status_code=400)
             btn = matches[0]
             overrides = _read_key_overrides()

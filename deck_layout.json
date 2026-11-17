@@ -275,6 +275,24 @@
           "group": "도킹 · 시점",
           "mode": "hold",
           "keys": ""
+        },
+        {
+          "id": "wheel-power",
+          "label": "함선 전원",
+          "action": "spaceship_power.v_power_toggle",
+          "mode": "tap",
+          "group": "전원 전환 · 꺼질 수 있음",
+          "caution": true,
+          "xml_only": true
+        },
+        {
+          "id": "wheel-engine",
+          "label": "엔진 전원",
+          "action": "spaceship_power.v_power_toggle_thrusters",
+          "mode": "tap",
+          "group": "전원 전환 · 꺼질 수 있음",
+          "caution": true,
+          "xml_only": true
         }
       ],
       "wheel": {
@@ -286,6 +304,10 @@
           "landing-seq",
           "vtol",
           "ship-light"
+        ],
+        "footer": [
+          "wheel-power",
+          "wheel-engine"
         ]
       }
     },

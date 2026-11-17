@@ -211,6 +211,10 @@
   .btn.active { box-shadow:0 0 0 1px rgba(70,200,230,.5), 0 0 26px rgba(70,200,230,.35),
     0 0 60px rgba(70,200,230,.16), inset 0 1px 0 rgba(255,255,255,.06); }
   /* 레이디얼 휠 */
+  #wheelPanel { max-width:620px; margin:0 auto; }
+  #wheelPower { display:grid; grid-template-columns:1fr 1fr; gap:24px; padding:0 14px; }
+  #wheelPower .btn { min-height:76px; }
+  .wheel-power-note { text-align:center; font-size:11px; color:#dcb298; margin:10px 0 0; }
   #wheelWrap { display:flex; justify-content:center; padding:10px 14px 4px; }
   svg.wheel { width:min(100%,560px); height:auto; overflow:visible; touch-action:none; }
   .wseg { fill:url(#segGrad); stroke:rgba(110,168,198,.30); stroke-width:1.5; }
@@ -426,7 +430,7 @@ function render() {
   grid.replaceChildren();
   grid.className = page.id === 'power' ? 'power' : '';
   const wheel = page.wheel || null;
-  const wheelIds = wheel ? new Set([wheel.center, ...(wheel.segments || [])]) : new Set();
+  const wheelIds = wheel ? new Set([wheel.center, ...(wheel.segments || []), ...(wheel.footer || [])]) : new Set();
   if (wheel) buildWheel(grid, page, wheelIds);
   const groups = new Map();
   page.buttons.forEach(b => {
@@ -556,7 +560,11 @@ function buildWheel(grid, page, wheelIds) {
     + '<radialGradient id="ctrGrad" cx="50%" cy="40%" r="70%">'
     + '<stop offset="0%" stop-color="#1e3a4a"/><stop offset="100%" stop-color="#0c1820"/></radialGradient>'
     + clip + '</defs>' + body + '</svg>';
-  grid.appendChild(wrap);
+  const panel=document.createElement('section');panel.id='wheelPanel';panel.appendChild(wrap);
+  const footer=document.createElement('div');footer.id='wheelPower';
+  (wheel.footer||[]).forEach(id=>{const b=page.buttons.find(b=>b.id===id);if(b)footer.appendChild(makeButton(b));});
+  if(footer.children.length){panel.appendChild(footer);const note=document.createElement('p');note.className='wheel-power-note';note.textContent='전원 전환 · 눌러서 꺼질 수 있음 · 상태 표시 아님';panel.appendChild(note);}
+  grid.appendChild(panel);
   const byId = {};
   [center, ...segs].forEach(b => { byId[b.id] = b; });
   wrap.querySelectorAll('.wb').forEach(el => bindWheel(el, byId[el.dataset.bid]));
@@ -695,9 +703,9 @@ function drawKeyEditor() {
   const isSeq=!!(b && b.sequence);
   document.getElementById('keyButtonName').textContent=b?.label || '버튼을 선택하세요';
   document.getElementById('keyCurrent').textContent=b ? '현재: '+sourceLabel(b) : '';
-  document.getElementById('keyMessage').textContent=b?.blocked_reason || '';
+  document.getElementById('keyMessage').textContent=b?.xml_only?'XML 전용 바로가기 · 전력·시스템의 전원 버튼과 같은 게임 액션입니다.':(b?.blocked_reason || '');
   const locked=isSeq ? (!b || !(b.steps||[]).length)
-                     : (!b || !b.action || !!b.blocked_reason);
+                     : (!b || !b.action || !!b.blocked_reason || !!b.xml_only);
   document.getElementById('keyMainLabel').style.display=isSeq?'none':'';
   document.getElementById('keyMain').style.display=isSeq?'none':'';
   document.getElementById('keyMods').style.display=isSeq?'none':'';
@@ -784,7 +792,7 @@ async function saveSetting(reset) {
     releaseAll();K.layout=j.layout;S.layout=j.layout;render();drawKeyList();
     document.getElementById('keyMessage').textContent=reset ? (isSeq ? '전체 단계 키를 XML로, 간격을 기본값으로 되돌렸습니다.' : '사용자 지정을 지웠습니다. XML에 없으면 잠금 상태입니다.') : (isSeq ? 'PC에 시퀀스 키와 간격을 저장했습니다. 게임의 실제 키와 맞춰 주세요.' : 'PC에 저장했습니다. 게임의 실제 키와 맞는지 확인하세요.');
   } catch(e){document.getElementById('keyMessage').textContent=e.message || 'PC 연결 실패';}
-  finally {K.busy=false;document.getElementById('keySection').disabled=false;document.getElementById('keyUnassigned').disabled=false;const b=selectedSetting();const s2=!!(b&&b.sequence);const locked=s2 ? (!b||!(b.steps||[]).length) : (!b || !b.action || !!b.blocked_reason);document.getElementById('keySave').disabled=locked;document.getElementById('keyReset').disabled=locked || (s2 ? !(b?.custom_delays||b?.custom_step_keys) : !b?.override_keys);}
+  finally {K.busy=false;document.getElementById('keySection').disabled=false;document.getElementById('keyUnassigned').disabled=false;const b=selectedSetting();const s2=!!(b&&b.sequence);const locked=s2 ? (!b||!(b.steps||[]).length) : (!b || !b.action || !!b.blocked_reason || !!b.xml_only);document.getElementById('keySave').disabled=locked;document.getElementById('keyReset').disabled=locked || (s2 ? !(b?.custom_delays||b?.custom_step_keys) : !b?.override_keys);}
 }
 const mainKeys=['',...Array.from({length:12},(_,i)=>'f'+(i+1)),...'0123456789',...'bcfghijklmnoprtuvxyz',
  'tab','enter','esc','backspace','delete','insert','home','end','pageup','pagedown','minus','equal','lbracket','rbracket','semicolon','apostrophe','comma','period','slash','backslash','backquote',

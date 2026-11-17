@@ -420,4 +420,39 @@ class DeckTests(unittest.TestCase):
         r=self.client.post('/api/key-settings',headers=self.headers,json={'button_id':'launch-seq','step_keys':['','space','f6']})
         self.assertEqual(r.status_code,200,r.text)
 
+    def test_physical_modifiers_ignore_layout_mapping(self):
+        for vk, expected in [(0xA5,(0x38,9)),(0xA3,(0x1d,9)),(0xA4,(0x38,8)),
+                             (0xA2,(0x1d,8)),(0xA0,(0x2a,8)),(0xA1,(0x36,8))]:
+            with patch.object(m,'_game_focused') as unused:
+                mapper=__import__('unittest.mock',fromlist=['Mock']).Mock(return_value=0)
+                self.assertEqual(m._keyboard_scan(vk,0,mapper),expected)
+                self.assertEqual(m._keyboard_scan(vk,2,mapper),(expected[0],expected[1]|2))
+                mapper.assert_not_called()
+    def test_scan_zero_and_e1_are_rejected(self):
+        for scan in (0,0xE100,0xE145):
+            with self.assertRaises(ValueError):m._keyboard_scan(0x52,0,lambda *a:scan)
+        self.assertEqual(m._keyboard_scan(0x52,0,lambda *a:0x13),(0x13,8))
+        self.assertEqual(m._keyboard_scan(0x2e,2,lambda *a:0xE053),(0x53,11))
+    def test_diagnostic_log_is_bounded_and_local(self):
+        with patch.object(m,'EXE_DIR',self.tmp.name):
+            m._trace_input(vk=165,scan=56,flags=9,result=1)
+            p=Path(self.tmp.name)/'input_diagnostics.jsonl'
+            self.assertEqual(json.loads(p.read_text())['scan'],56)
+            p.write_text('x'*(256*1024+1))
+            m._trace_input(vk=165,result=0)
+            self.assertTrue(Path(str(p)+'.1').exists())
+            self.assertLess(p.stat().st_size,1024)
+    def test_wheel_power_xml_only_and_shared_actions(self):
+        self.xml('<ActionMaps><actionmap name="spaceship_power"><action name="v_power_toggle"><rebind input="kb1_u"/></action><action name="v_power_toggle_thrusters"><rebind input="kb1_i"/></action></actionmap></ActionMaps>')
+        d=self.client.get('/api/layout').json();ship=next(p for p in d['pages'] if p['id']=='ship')
+        self.assertEqual(ship['wheel']['footer'],['wheel-power','wheel-engine'])
+        for bid,key in [('wheel-power','u'),('wheel-engine','i')]:
+            b=next(b for b in ship['buttons'] if b['id']==bid)
+            self.assertFalse(b['unbound']);self.assertEqual(b['keys'],key)
+            self.assertEqual(self.client.post('/api/key-settings',headers=self.headers,json={'button_id':bid,'keys':'f5'}).status_code,400)
+        self.cfg['actionmaps_path']='';m._AM_CACHE['path']=None
+        d=self.client.get('/api/layout').json()
+        for b in m._deck_buttons(d):
+            if b['id'] in ('wheel-power','wheel-engine'):self.assertTrue(b['unbound'])
+
 if __name__=='__main__':unittest.main()

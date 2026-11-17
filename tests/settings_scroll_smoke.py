@@ -22,7 +22,7 @@ with sync_playwright() as p:
    r.fulfill(content_type='application/json',body=json.dumps(data))
   page.route('http://deck.test/**',route);page.goto('http://deck.test/')
   page.locator('#settingsOpen').click();page.locator('#keySection').select_option('3')
-  assert page.locator('#keyList button').count()==13
+  assert page.locator('#keyList button').count()==15
   lst=page.locator('#keyList');lst.scroll_into_view_if_needed()
   geom=lst.evaluate('e=>({client:e.clientHeight,scroll:e.scrollHeight,touch:getComputedStyle(e.querySelector("button")).touchAction})')
   print(width,height,geom)
@@ -40,8 +40,8 @@ with sync_playwright() as p:
   # Continue with real wheel input and verify the final item can be selected.
   page.mouse.move(box['x']+box['width']/2,box['y']+min(box['height']-15,80))
   page.mouse.wheel(0,1500);page.wait_for_timeout(400)
-  last=page.locator('[data-setting-id="freelook"]')
-  last.click();assert page.locator('#keyButtonName').inner_text()=='자유 시점'
+  last=page.locator('[data-setting-id="wheel-engine"]')
+  last.click();assert page.locator('#keyButtonName').inner_text()=='엔진 전원'
   page.screenshot(path=str(O/f'{width}x{height}-last-selected.png'))
   # The outer dialog must also allow reaching the editor actions on short screens.
   page.locator('#keySave').scroll_into_view_if_needed()

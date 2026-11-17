@@ -13,7 +13,9 @@ with tempfile.TemporaryDirectory() as tmp, sync_playwright() as p:
   actions.update(st['action'] for st in b.get('sequence',[]))
  maps={}
  for i,a in enumerate(sorted(actions)):
-  am,ac=a.split('.',1);key='space' if a.endswith('.v_strafe_up') else 'rctrl+f'+str(i%12+1) if i<12 else 'ralt+np_'+str(i%10) if i<22 else 'lctrl+lalt+f'+str(i%12+1)
+  am,ac=a.split('.',1);key='space' if a.endswith('.v_strafe_up') else ['rctrl','ralt','lctrl+lshift','rctrl+rshift','lalt+lshift'][i//12]+'+f'+str(i%12+1)
+  if a=='spaceship_power.v_power_toggle':key='u'
+  if a=='spaceship_power.v_power_toggle_thrusters':key='i'
   maps.setdefault(am,[]).append(f'<action name="{ac}"><rebind input="kb1_{key}"/></action>')
  xml=Path(tmp)/'synthetic.xml';xml.write_text('<ActionMaps>'+''.join(f'<actionmap name="{am}">'+''.join(v)+'</actionmap>' for am,v in maps.items())+'</ActionMaps>')
  layout=m._resolved_deck_layout({'actionmaps_path':str(xml)},overrides={})
@@ -40,10 +42,13 @@ with tempfile.TemporaryDirectory() as tmp, sync_playwright() as p:
   r.fulfill(content_type='application/json',body=json.dumps(data))
  page.route('http://deck.test/**',route);page.goto('http://deck.test/')
  page.get_by_role('button',name='조종·착륙',exact=True).click()
+ assert page.locator('#wheelPower button').count()==2
+ left=page.locator('#wheelPower button').nth(0).bounding_box();right=page.locator('#wheelPower button').nth(1).bounding_box()
+ assert left['x']<right['x'] and abs(left['y']-right['y'])<2
  assert page.locator('.wb').count()==7
  assert page.locator('.wb.seq').count()==2
  assert page.locator('#grid [data-id="gear"]').count()==0
- page.screenshot(path=str(O/'tablet-idle.png'))
+ page.locator('#wheelPanel').screenshot(path=str(O/'tablet-idle.png'))
  page.locator('[data-bid="launch-seq"]').dispatch_event('pointerdown')
  page.wait_for_timeout(500);assert page.locator('#seqBar').is_visible();assert len(req)==1
  page.locator('[data-bid="landing-seq"]').dispatch_event('pointerdown');assert len(req)==1
@@ -54,7 +59,7 @@ with tempfile.TemporaryDirectory() as tmp, sync_playwright() as p:
  assert not page.locator('#seqBar').is_visible()
  page.set_viewport_size({'width':390,'height':844});page.evaluate('window.scrollTo(0,200)')
  assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
- page.screenshot(path=str(O/'phone-wheel.png'))
+ page.locator('#wheelPanel').screenshot(path=str(O/'phone-wheel.png'))
  page.locator('#settingsOpen').click();page.locator('#keySection').select_option('3')
  page.locator('[data-setting-id="launch-seq"]').click()
  assert page.locator('#seqSteps input[data-step]').count()==3
