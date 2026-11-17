@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory() as tmp, sync_playwright() as p:
  for bt in ship['buttons']:
   if bt['id'] in keys:bt.update(keys=keys[bt['id']],unbound=False)
   if bt.get('sequence'):bt.update(keys='SEQ',unbound=False)
- state={'running':False,'step':0,'total':3,'label':'LAUNCH','button_id':'launch-seq'};req=[];errors=[]
+ state={'running':False,'step':0,'total':3,'label':'LAUNCH','button_id':'launch-seq'};req=[];input_calls=[];errors=[]
  browser=p.chromium.launch();page=browser.new_page(viewport={'width':1024,'height':1100})
  page.add_init_script("localStorage.setItem('sc_pair','123456')")
  page.on('pageerror',lambda e:errors.append(str(e)))
@@ -37,17 +37,22 @@ with tempfile.TemporaryDirectory() as tmp, sync_playwright() as p:
   elif path=='/api/sequence':
    req.append(json.loads(r.request.post_data));state.update(running=True,step=1);data={'ok':True}
   elif path=='/api/sequence-cancel':state.update(running=False,msg='취소했습니다');data={'ok':True}
+  elif path=='/api/input':input_calls.append(json.loads(r.request.post_data));data={'ok':True}
   elif path.startswith('/api/'):data={'ok':True}
   else:return r.fulfill(content_type='text/html',body=(D/'control_deck.html').read_text())
   r.fulfill(content_type='application/json',body=json.dumps(data))
  page.route('http://deck.test/**',route);page.goto('http://deck.test/')
  page.get_by_role('button',name='조종·착륙',exact=True).click()
- assert page.locator('#wheelPower button').count()==2
- left=page.locator('#wheelPower button').nth(0).bounding_box();right=page.locator('#wheelPower button').nth(1).bounding_box()
+ assert page.locator('.power-side').count()==2
+ left=page.locator('.power-side').nth(0).bounding_box();right=page.locator('.power-side').nth(1).bounding_box()
  assert left['x']<right['x'] and abs(left['y']-right['y'])<2
- assert page.locator('.wb').count()==7
+ assert page.locator('.wb:not(.power-side)').count()==7
  assert page.locator('.wb.seq').count()==2
  assert page.locator('#grid [data-id="gear"]').count()==0
+ assert page.locator('#wheelPower').count()==0
+ page.locator('.power-side').nth(0).dispatch_event('pointerdown');page.wait_for_timeout(300)
+ page.locator('.power-side').nth(1).dispatch_event('pointerdown');page.wait_for_timeout(300)
+ assert [x['key'] for x in input_calls]==['u','i'],input_calls
  page.locator('#wheelPanel').screenshot(path=str(O/'tablet-idle.png'))
  page.locator('[data-bid="launch-seq"]').dispatch_event('pointerdown')
  page.wait_for_timeout(500);assert page.locator('#seqBar').is_visible();assert len(req)==1
@@ -59,6 +64,7 @@ with tempfile.TemporaryDirectory() as tmp, sync_playwright() as p:
  assert not page.locator('#seqBar').is_visible()
  page.set_viewport_size({'width':390,'height':844});page.evaluate('window.scrollTo(0,200)')
  assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+ assert page.locator('.wheel').bounding_box()['width']*296/376>=250
  page.locator('#wheelPanel').screenshot(path=str(O/'phone-wheel.png'))
  page.locator('#settingsOpen').click();page.locator('#keySection').select_option('3')
  page.locator('[data-setting-id="launch-seq"]').click()

@@ -211,12 +211,12 @@
   .btn.active { box-shadow:0 0 0 1px rgba(70,200,230,.5), 0 0 26px rgba(70,200,230,.35),
     0 0 60px rgba(70,200,230,.16), inset 0 1px 0 rgba(255,255,255,.06); }
   /* 레이디얼 휠 */
-  #wheelPanel { max-width:620px; margin:0 auto; }
-  #wheelPower { display:grid; grid-template-columns:1fr 1fr; gap:24px; padding:0 14px; }
-  #wheelPower .btn { min-height:76px; }
+  #wheelPanel { max-width:700px; margin:0 auto; }
+  .wb.power-side .wseg { stroke:rgba(240,168,110,.65); fill:#231e1b; }
+  .wb.power-side .wtxt, .wb.power-side .wkey { fill:#f0b98d; }
   .wheel-power-note { text-align:center; font-size:11px; color:#dcb298; margin:10px 0 0; }
   #wheelWrap { display:flex; justify-content:center; padding:10px 14px 4px; }
-  svg.wheel { width:min(100%,560px); height:auto; overflow:visible; touch-action:none; }
+  svg.wheel { width:100%; height:auto; overflow:visible; touch-action:none; }
   .wseg { fill:url(#segGrad); stroke:rgba(110,168,198,.30); stroke-width:1.5; }
   .wcenter { fill:url(#ctrGrad); stroke:rgba(140,235,255,.75); stroke-width:2; }
   .wfill { fill:rgba(70,200,230,.32); transform:translateY(640px); opacity:0; pointer-events:none;
@@ -552,21 +552,31 @@ function buildWheel(grid, page, wheelIds) {
     + `<circle class="wcenter" cx="${cx}" cy="${cy}" r="${cr}"></circle>`
     + `<g clip-path="url(#wcc)"><circle class="wfill" cx="${cx}" cy="${cy}" r="${cr}"></circle></g>`
     + `<text class="wctext" x="${cx}" y="${cy + 7}" font-size="18">${esc(center.label)}</text></g>`;
+  const sideButtons=(wheel.footer||[]).map(id=>page.buttons.find(b=>b.id===id)).filter(Boolean);
+  sideButtons.forEach((b,i)=>{
+    const d=i===0?'M-24 10 H74 Q8 45 4 160 H-24 Z':'M344 10 H246 Q312 45 316 160 H344 Z';
+    const x=i===0?0:320, off=b.unbound||!b.keys;
+    clip+=`<clipPath id="wside${i}"><path d="${d}"/></clipPath>`;
+    body+=`<g class="wb power-side${off?' off':''}" data-bid="${esc(b.id)}" role="button" aria-label="${esc(b.label)}">`
+      +`<title>${esc(b.label)} · ${esc(off?(b.disabled_reason||'키 지정 필요'):b.keys.toUpperCase())} · 전원 전환</title>`
+      +`<path class="wseg" d="${d}"/><g clip-path="url(#wside${i})"><path class="wfill" d="${d}"/></g>`
+      +`<text class="wtxt" x="${x}" y="48" font-size="13">${i===0?'함선':'엔진'}</text>`
+      +`<text class="wtxt" x="${x}" y="66" font-size="13">전원</text>`
+      +`<text class="wkey" x="${x}" y="88" font-size="9">${esc(off?'잠금':b.keys.length<=4?b.keys.toUpperCase():'XML')}</text></g>`;
+  });
   const wrap = document.createElement('div');
   wrap.id = 'wheelWrap';
-  wrap.innerHTML = '<svg class="wheel" viewBox="0 0 320 320" role="group" aria-label="빠른 조작 휠"><defs>'
+  wrap.innerHTML = '<svg class="wheel" viewBox="-28 0 376 320" role="group" aria-label="빠른 조작 휠"><defs>'
     + '<radialGradient id="segGrad" cx="50%" cy="42%" r="75%">'
     + '<stop offset="0%" stop-color="#182f3d"/><stop offset="100%" stop-color="#0d1b26"/></radialGradient>'
     + '<radialGradient id="ctrGrad" cx="50%" cy="40%" r="70%">'
     + '<stop offset="0%" stop-color="#1e3a4a"/><stop offset="100%" stop-color="#0c1820"/></radialGradient>'
     + clip + '</defs>' + body + '</svg>';
   const panel=document.createElement('section');panel.id='wheelPanel';panel.appendChild(wrap);
-  const footer=document.createElement('div');footer.id='wheelPower';
-  (wheel.footer||[]).forEach(id=>{const b=page.buttons.find(b=>b.id===id);if(b)footer.appendChild(makeButton(b));});
-  if(footer.children.length){panel.appendChild(footer);const note=document.createElement('p');note.className='wheel-power-note';note.textContent='전원 전환 · 눌러서 꺼질 수 있음 · 상태 표시 아님';panel.appendChild(note);}
+  if(sideButtons.length){const note=document.createElement('p');note.className='wheel-power-note';note.textContent='양쪽 전원 전환 · 눌러서 꺼질 수 있음 · 상태 표시 아님';panel.appendChild(note);}
   grid.appendChild(panel);
   const byId = {};
-  [center, ...segs].forEach(b => { byId[b.id] = b; });
+  [center, ...segs, ...sideButtons].forEach(b => { byId[b.id] = b; });
   wrap.querySelectorAll('.wb').forEach(el => bindWheel(el, byId[el.dataset.bid]));
 }
 function bindWheel(el, b) {
