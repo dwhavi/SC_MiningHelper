@@ -57,7 +57,7 @@ with tempfile.TemporaryDirectory() as tmp, sync_playwright() as p:
  page.screenshot(path=str(O/'phone-wheel.png'))
  page.locator('#settingsOpen').click();page.locator('#keySection').select_option('3')
  page.locator('[data-setting-id="launch-seq"]').click()
- assert page.locator('#seqSteps input').count()==3
+ assert page.locator('#seqSteps input[data-step]').count()==3
  assert not page.locator('#keyMain').is_visible()
  page.screenshot(path=str(O/'phone-delays.png'))
  assert not errors,errors

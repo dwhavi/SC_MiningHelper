@@ -377,4 +377,47 @@ class DeckTests(unittest.TestCase):
         self.assertFalse(b['custom_delays'])
         self.assertEqual(b['steps'][0]['delay_ms'], 2000)
 
+    def test_sequence_step_keys_save_without_xml_and_persist_reset(self):
+        payload={'button_id':'launch-seq','step_keys':['f5','space','f6'], 'delays':[500,700,900]}
+        r=self.client.post('/api/key-settings',headers=self.headers,json=payload)
+        self.assertEqual(r.status_code,200,r.text)
+        b=self._seq_button();self.assertFalse(b['unbound'])
+        self.assertEqual([st['key'] for st in b['steps']],['f5','space','f6'])
+        self.assertTrue(b['custom_step_keys'])
+        self.assertEqual(m._read_key_overrides()['launch-seq']['step_keys']['spaceship_movement.v_atc_request'],'f5')
+        self.xml(_SEQ_XML)
+        payload['step_keys']=['','space','f6']
+        r=self.client.post('/api/key-settings',headers=self.headers,json=payload)
+        self.assertEqual(r.status_code,200,r.text)
+        b=self._seq_button();self.assertEqual(b['steps'][0]['key'],'lalt+n')
+        self.assertEqual(b['steps'][0]['keys_source'],'actionmaps')
+        self.assertEqual(b['steps'][2]['keys_source'],'override')
+        self.client.post('/api/key-settings',headers=self.headers,json={'button_id':'launch-seq'})
+        self.assertFalse(self._seq_button()['custom_step_keys'])
+        self.assertEqual(self._seq_button()['steps'][2]['key'],'k')
+    def test_sequence_step_keys_reject_unsafe_and_conflicts(self):
+        self.xml(_SEQ_XML)
+        for keys in [['w','space','f6'], ['space','space','f6'], ['f5','lalt+space','f6'],
+                     ['lalt+f4','space','f6'], ['f5','mwheel_up','f6'], ['f5','space','f5'],
+                     ['k','space','f6'], ['f5'], ['f5','space','lalt+d']]:
+            r=self.client.post('/api/key-settings',headers=self.headers,json={'button_id':'launch-seq','step_keys':keys})
+            self.assertEqual(r.status_code,400,(keys,r.text))
+        self.assertNotIn('launch-seq',m._read_key_overrides())
+    def test_sequence_step_partial_edit_and_delays_preserve_keys(self):
+        r=self.client.post('/api/key-settings',headers=self.headers,json={'button_id':'launch-seq','step_keys':['f5','','']})
+        self.assertEqual(r.status_code,200,r.text)
+        self.assertTrue(self._seq_button()['unbound'])
+        r=self.client.post('/api/key-settings',headers=self.headers,json={'button_id':'launch-seq','delays':[400,600,800]})
+        self.assertEqual(r.status_code,200,r.text)
+        self.assertEqual(self._seq_button()['steps'][0]['key'],'f5')
+    def test_sequence_step_conflicts_with_manual_override(self):
+        self.client.post('/api/key-settings',headers=self.headers,json={'button_id':'weapons-increase','keys':'f5'})
+        r=self.client.post('/api/key-settings',headers=self.headers,json={'button_id':'launch-seq','step_keys':['f5','','']})
+        self.assertEqual(r.status_code,400,r.text)
+    def test_sequence_step_custom_same_action_is_allowed(self):
+        self.xml(_SEQ_XML)
+        self.client.post('/api/key-settings',headers=self.headers,json={'button_id':'gear','keys':'f6'})
+        r=self.client.post('/api/key-settings',headers=self.headers,json={'button_id':'launch-seq','step_keys':['','space','f6']})
+        self.assertEqual(r.status_code,200,r.text)
+
 if __name__=='__main__':unittest.main()

@@ -849,7 +849,7 @@ def _write_key_overrides(overrides):
             os.unlink(tmp)
 
 
-def _validate_override_key(key, mode="tap"):
+def _validate_override_key(key, mode="tap", allow_space=False):
     if len(key) > 64 or any(c in key for c in (";", ",", "\n", "\r")):
         raise ValueError("단일 키 또는 조합키만 지원합니다")
     parts = key.strip().lower().split("+")
@@ -860,7 +860,7 @@ def _validate_override_key(key, mode="tap"):
         raise ValueError("수식자만 지정할 수 없습니다")
     if any(v in (0x5B, 0x5C) for v in mods) or main in (0x5B, 0x5C):
         raise ValueError("Windows 키는 지원하지 않습니다")
-    if main in {ord(c) for c in "WASDQE"} | {0x20, 0x25, 0x26, 0x27, 0x28}:
+    if main in {ord(c) for c in "WASDQE"} | {0x20, 0x25, 0x26, 0x27, 0x28} and not (allow_space and main == 0x20 and not mods):
         raise ValueError("이동 키는 지정할 수 없습니다")
     alt = any(v in (0x12, 0xA4, 0xA5) for v in mods)
     ctrl = any(v in (0x11, 0xA2, 0xA3) for v in mods)
@@ -896,6 +896,11 @@ def _resolve_sequence(btn, bindings, owners, overrides):
     custom = overrides.get(btn.get("id"), {})
     saved = (custom.get("delays") if isinstance(custom, dict)
              and custom.get("action") == "sequence" else None)
+    step_keys = custom.get("step_keys", {}) if isinstance(custom, dict) and custom.get("action") == "sequence" else {}
+    if not isinstance(step_keys, dict):
+        step_keys = {}
+    btn["custom_step_keys"] = bool(step_keys)
+    btn["custom_delays"] = bool(saved)
     for i, st in enumerate(btn.get("sequence") or []):
         if not isinstance(st, dict):
             continue
@@ -911,9 +916,15 @@ def _resolve_sequence(btn, bindings, owners, overrides):
             saved = None
         if st.get("action") != "spaceship_movement.v_strafe_up":
             hold = 0
-        key = bindings.get(str(st.get("action") or ""), "")
+        act = str(st.get("action") or "")
+        xml_key = bindings.get(act, "")
+        override_key = step_keys.get(act, "")
+        key = override_key or xml_key
+        if not isinstance(key, str):
+            key = ""
         steps.append({"label": str(st.get("label") or f"{i + 1}단계"),
-                      "action": str(st.get("action") or ""), "key": key,
+                      "action": act, "key": key, "xml_key": xml_key,
+                      "override_key": override_key, "keys_source": "override" if override_key else "actionmaps",
                       "delay_ms": min(max(delay, _SEQ_MIN_DELAY_MS), _SEQ_MAX_DELAY_MS),
                       "hold_ms": min(max(hold, 0), _SEQ_MAX_HOLD_MS)})
     btn["steps"] = steps
@@ -921,21 +932,24 @@ def _resolve_sequence(btn, bindings, owners, overrides):
         btn["disabled_reason"] = "시퀀스 정의 확인 필요"
         return
     missing = [s["label"] for s in steps if not s["key"]]
-    if missing:
-        btn["disabled_reason"] = "시퀀스 키 지정 필요: " + ", ".join(missing)
-        return
     try:
-        for s in steps:
-            combo = _combo_id(s["key"])
-            if s["key"].lower() in {"w", "a", "s", "d", "q", "e", "space", "up", "down", "left", "right"} and not (
-                    s["action"] == "spaceship_movement.v_strafe_up" and s["key"].lower() == "space"):
-                btn["disabled_reason"] = "이동 키 제외"
-                return
-            if len(owners.get(combo, set())) > 1:
+        for st in steps:
+            if not st["key"]:
+                continue
+            st["key"] = _validate_override_key(st["key"], "hold" if st["hold_ms"] else "tap",
+                allow_space=btn.get("id") == "launch-seq" and st["action"] == "spaceship_movement.v_strafe_up")
+            combo = _combo_id(st["key"])
+            if owners.get(combo, set()) - {st["action"]}:
                 btn["disabled_reason"] = "XML 키 중복 · 확인 필요"
                 return
-    except ValueError:
-        btn["disabled_reason"] = "시퀀스 키 확인 필요"
+            if any(other.get("key") and other["action"] != st["action"] and _combo_id(other["key"]) == combo for other in steps):
+                btn["disabled_reason"] = "시퀀스 단계 키 중복 · 확인 필요"
+                return
+    except (ValueError, TypeError) as e:
+        btn["disabled_reason"] = "시퀀스 키 확인 필요: " + str(e)
+        return
+    if missing:
+        btn["disabled_reason"] = "시퀀스 키 지정 필요: " + ", ".join(missing)
         return
     btn.update(keys="SEQ", unbound=False, keys_source="sequence",
                disabled_reason="", custom_delays=bool(saved))
@@ -1095,6 +1109,26 @@ def _resolved_deck_layout(cfg, overrides=None):
         if len({b.get("action") or b.get("id") for b in buttons}) > 1:
             for btn in buttons:
                 btn.update(keys="", unbound=True, disabled_reason="덱 키 중복 · 확인 필요")
+    assigned = [(b.get("action"), b["keys"]) for b in _deck_buttons(layout)
+                if not b.get("sequence") and not b.get("unbound") and b.get("keys")]
+    seq_buttons = [b for b in _deck_buttons(layout) if b.get("sequence")]
+    for b in seq_buttons:
+        for st in b.get("steps", []):
+            try:
+                if st.get("key"):
+                    _combo_id(st["key"])
+                    assigned.append((st["action"], st["key"]))
+            except (ValueError, TypeError):
+                pass
+    for b in seq_buttons:
+        if b.get("unbound") and not b.get("disabled_reason", "").startswith("시퀀스 키 지정 필요"):
+            continue
+        for st in b.get("steps", []):
+            if not st.get("key"):
+                continue
+            if any(act != st["action"] and _combo_id(key) == _combo_id(st["key"]) for act, key in assigned):
+                b.update(keys="", unbound=True, disabled_reason="덱/시퀀스 키 중복 · 확인 필요")
+                break
     return layout
 
 
@@ -1211,6 +1245,7 @@ def create_app(state, cfg):
     class KeySetting(BaseModel):
         button_id: str
         keys: str = ""
+        step_keys: list[str] | None = None  # empty item restores that step to XML
         delays: list[StrictInt] | None = None   # 시퀀스 버튼의 단계별 간격(ms)
 
     class SeqRequest(BaseModel):
@@ -1288,19 +1323,36 @@ def create_app(state, cfg):
             btn = matches[0]
             overrides = _read_key_overrides()
             if btn.get("sequence"):
-                if body.delays is not None:
-                    steps = btn.get("steps") or []
-                    if (len(body.delays) != len(steps)
-                            or any(not isinstance(d, int) or isinstance(d, bool)
-                                   or d < _SEQ_MIN_DELAY_MS or d > _SEQ_MAX_DELAY_MS
-                                   for d in body.delays)):
-                        return JSONResponse(
-                            {"msg": f"단계 간격은 {_SEQ_MIN_DELAY_MS}~{_SEQ_MAX_DELAY_MS}ms, "
-                                    "단계 수와 같아야 합니다"}, status_code=400)
-                    overrides[body.button_id] = {"action": "sequence",
-                                                 "delays": [int(d) for d in body.delays]}
-                else:
+                steps = btn.get("steps") or []
+                if not steps:
+                    return JSONResponse({"msg": "시퀀스 정의 확인 필요"}, status_code=400)
+                if body.delays is None and body.step_keys is None:
                     overrides.pop(body.button_id, None)
+                else:
+                    entry = dict(overrides.get(body.button_id, {}))
+                    entry["action"] = "sequence"
+                    if body.delays is not None:
+                        if len(body.delays) != len(steps) or any(d < _SEQ_MIN_DELAY_MS or d > _SEQ_MAX_DELAY_MS for d in body.delays):
+                            return JSONResponse({"msg": "단계 간격은 200~10000ms, 단계 수와 같아야 합니다"}, status_code=400)
+                        entry["delays"] = list(body.delays)
+                    if body.step_keys is not None:
+                        if len(body.step_keys) != len(steps):
+                            return JSONResponse({"msg": "단계 키 개수가 맞지 않습니다"}, status_code=400)
+                        keys = {}
+                        try:
+                            for st, key in zip(steps, body.step_keys):
+                                if key.strip():
+                                    keys[st["action"]] = _validate_override_key(key, "hold" if st["hold_ms"] else "tap",
+                                        allow_space=body.button_id == "launch-seq" and st["action"] == "spaceship_movement.v_strafe_up")
+                        except ValueError as e:
+                            return JSONResponse({"msg": str(e)}, status_code=400)
+                        entry["step_keys"] = keys
+                    overrides[body.button_id] = entry
+                    proposed = _resolved_deck_layout(cfg, overrides)
+                    candidate = next(b for b in _deck_buttons(proposed) if b.get("id") == body.button_id)
+                    # Missing XML for a different, not-yet-edited step is allowed; conflicts are not.
+                    if candidate.get("unbound") and not candidate.get("disabled_reason", "").startswith("시퀀스 키 지정 필요"):
+                        return JSONResponse({"msg": candidate.get("disabled_reason", "키 확인 필요")}, status_code=400)
             elif not btn.get("action"):
                 return JSONResponse({"msg": "이 버튼은 변경할 수 없습니다"}, status_code=400)
             elif body.keys.strip():

@@ -250,8 +250,16 @@
     background:#101f2b; border:1px solid rgba(90,140,170,.22); border-radius:8px; padding:8px 10px; }
   #seqSteps .step-row .nm { font-size:13px; } #seqSteps .step-row .ky { font-size:11px; color:#9bb2c5;
     font-family:ui-monospace,Menlo,Consolas,monospace; }
-  #seqSteps input { width:110px; background:#0a131c; border:1px solid rgba(90,140,170,.35); color:var(--fg);
+  #seqSteps input[type=number] { width:110px; background:#0a131c; border:1px solid rgba(90,140,170,.35); color:var(--fg);
     border-radius:6px; padding:7px 8px; font-size:13px; text-align:right; }
+  #seqSteps .step-row { display:block; }
+  .step-info { min-width:0; }
+  .seq-mods { display:grid; grid-template-columns:repeat(3,1fr); gap:5px; }
+  .seq-mods label { font-size:10px; padding:6px 2px; background:#142431; border-radius:6px; }
+  .seq-mods input { accent-color:#46c8e6; }
+  .step-reset { display:block; font-size:12px; padding:7px 12px; margin:8px 0; background:#173040; border:1px solid #315164; border-radius:7px; }
+  .step-info > label { display:inline-block; margin-right:8px; font-size:12px; }
+  .seq-note { font-size:11px; color:#8ea5b5; line-height:1.5; }
   @media(max-width:600px) {
     #keyDialog { max-height:94dvh; }
     .settings-body { grid-template-columns:1fr; gap:12px; }
@@ -653,7 +661,7 @@ function settingGroups() {
 function sourceLabel(b) {
   if (b.sequence) {
     if (b.unbound) return b.disabled_reason || '시퀀스 키 지정 필요';
-    return (b.steps || []).length + '단계 시퀀스 · XML' + (b.custom_delays ? ' · 간격 조정됨' : '');
+    return (b.steps || []).length + '단계 시퀀스 · ' + (b.custom_step_keys?'사용자/XML':'XML') + (b.custom_delays ? ' · 간격 조정됨' : '');
   }
   if (b.unbound || !b.keys) return b.disabled_reason || '키 지정 필요';
   return b.keys.toUpperCase() + (b.keys_source === 'override' ? ' · 사용자 지정' : b.keys_source === 'fixed' ? ' · 고정 키' : ' · XML');
@@ -688,7 +696,7 @@ function drawKeyEditor() {
   document.getElementById('keyButtonName').textContent=b?.label || '버튼을 선택하세요';
   document.getElementById('keyCurrent').textContent=b ? '현재: '+sourceLabel(b) : '';
   document.getElementById('keyMessage').textContent=b?.blocked_reason || '';
-  const locked=isSeq ? (!b || b.unbound || !(b.steps||[]).length)
+  const locked=isSeq ? (!b || !(b.steps||[]).length)
                      : (!b || !b.action || !!b.blocked_reason);
   document.getElementById('keyMainLabel').style.display=isSeq?'none':'';
   document.getElementById('keyMain').style.display=isSeq?'none':'';
@@ -697,12 +705,31 @@ function drawKeyEditor() {
   const seqBox=document.getElementById('seqSteps');
   if (isSeq) {
     seqBox.style.display='';
-    seqBox.innerHTML=(b.steps||[]).map((s,i)=>
-      `<div class="step-row"><div><div class="nm">${i+1}. ${esc(s.label||'')}</div>`
-      +`<div class="ky">${esc(s.key||'')}</div></div>`
-      +`<input type="number" min="200" max="10000" step="100" value="${esc(String(s.delay_ms ?? 0))}" data-step="${i}" aria-label="${i+1}단계 뒤 대기(ms)"></div>`
-    ).join('')
-    +'<div style="font-size:11px;color:#8ea5b5;line-height:1.5">각 단계를 보낸 뒤 기다리는 시간 (200~10000ms). 게임 완료 여부는 확인되지 않으니 직접 맞춰 주세요.</div>';
+    seqBox.replaceChildren();
+    (b.steps||[]).forEach((st,i)=>{
+      const row=document.createElement('div');row.className='step-row';
+      const info=document.createElement('div');info.className='step-info';
+      const name=document.createElement('div');name.className='nm';name.textContent=`${i+1}. ${st.label || ''}`;
+      const source=document.createElement('div');source.className='ky';
+      source.textContent=`현재: ${(st.key || '미지정').toUpperCase()} · ${st.override_key?'사용자':'XML'}`;
+      const sel=document.createElement('select');sel.dataset.seqMain=i;sel.setAttribute('aria-label',`${i+1}단계 키`);
+      const selectedParts=(st.override_key||'').split('+');const main=selectedParts.pop();
+      const opts=[...mainKeys];
+      if(b.id==='launch-seq' && st.action==='spaceship_movement.v_strafe_up')opts.push('space');
+      opts.forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=k?k.toUpperCase():'XML 사용';sel.appendChild(o);});
+      sel.value=main||'';
+      const mods=document.createElement('div');mods.className='seq-mods';
+      ['lctrl','rctrl','lalt','ralt','lshift','rshift'].forEach(k=>{
+        const label=document.createElement('label');const cb=document.createElement('input');cb.type='checkbox';cb.value=k;cb.checked=selectedParts.includes(k);
+        label.append(cb,document.createTextNode(k.toUpperCase()));mods.appendChild(label);
+      });
+      const reset=document.createElement('button');reset.type='button';reset.className='step-reset';reset.textContent='이 단계 XML로';
+      reset.onclick=()=>{sel.value='';mods.querySelectorAll('input').forEach(c=>c.checked=false);};
+      const delayLabel=document.createElement('label');delayLabel.textContent='단계 뒤 대기 (ms)';
+      const delay=document.createElement('input');delay.type='number';delay.min=200;delay.max=10000;delay.step=100;delay.value=st.delay_ms ?? 1000;delay.dataset.step=i;delay.setAttribute('aria-label',`${i+1}단계 뒤 대기(ms)`);
+      info.append(name,source,sel,mods,reset,delayLabel,delay);row.appendChild(info);seqBox.appendChild(row);
+    });
+    const note=document.createElement('div');note.className='seq-note';note.textContent='XML 사용은 해당 단계의 사용자 키만 지웁니다. 편집 후 아래 저장을 누르세요. 대기 200~10000ms. 게임 완료 여부는 확인하지 못합니다.';seqBox.appendChild(note);
   } else {
     seqBox.style.display='none';seqBox.innerHTML='';
     const parts=(b?.override_keys || b?.keys || '').split('+');const main=parts.pop();
@@ -710,11 +737,11 @@ function drawKeyEditor() {
     document.querySelectorAll('#keyMods input').forEach(e=>{e.checked=parts.includes(e.value);e.disabled=locked;});
     previewSettingKey();
   }
-  document.getElementById('keySave').textContent=isSeq?'간격 저장':'이 키로 저장';
-  document.getElementById('keyReset').textContent=isSeq?'기본 간격':'XML로 되돌리기';
+  document.getElementById('keySave').textContent=isSeq?'시퀀스 설정 저장':'이 키로 저장';
+  document.getElementById('keyReset').textContent=isSeq?'전체 기본값':'XML로 되돌리기';
   document.getElementById('keyMain').disabled=locked;
   document.getElementById('keySave').disabled=locked;
-  document.getElementById('keyReset').disabled=locked || (isSeq ? !b?.custom_delays : !b?.override_keys);
+  document.getElementById('keyReset').disabled=locked || (isSeq ? !(b?.custom_delays||b?.custom_step_keys) : !b?.override_keys);
 }
 async function openKeySettings() {
   if(seqActive)return;
@@ -738,7 +765,11 @@ async function saveSetting(reset) {
     else {
       const delays=[...document.querySelectorAll('#seqSteps input[data-step]')].map(e=>parseInt(e.value,10));
       if(delays.some(d=>!Number.isFinite(d)||d<200||d>10000)){document.getElementById('keyMessage').textContent='간격은 200~10000ms 사이로 입력하세요';return;}
-      payload={button_id:b.id,delays};
+      const step_keys=[...document.querySelectorAll('#seqSteps .step-row')].map(row=>{
+        const main=row.querySelector('select').value;if(!main)return '';
+        return [...row.querySelectorAll('.seq-mods input:checked')].map(e=>e.value).concat(main).join('+');
+      });
+      payload={button_id:b.id,delays,step_keys};
     }
   } else {
     const key=reset ? '' : previewSettingKey();
@@ -751,9 +782,9 @@ async function saveSetting(reset) {
     const j=await r.json();
     if(!r.ok){if(r.status===401){keyDialog.close();showPair('다시 페어링하세요');}throw new Error(j.msg || '저장 실패');}
     releaseAll();K.layout=j.layout;S.layout=j.layout;render();drawKeyList();
-    document.getElementById('keyMessage').textContent=reset ? (isSeq ? '기본 간격으로 되돌렸습니다.' : '사용자 지정을 지웠습니다. XML에 없으면 잠금 상태입니다.') : (isSeq ? 'PC에 간격을 저장했습니다. 게임에서 직접 확인해 보세요.' : 'PC에 저장했습니다. 게임의 실제 키와 맞는지 확인하세요.');
+    document.getElementById('keyMessage').textContent=reset ? (isSeq ? '전체 단계 키를 XML로, 간격을 기본값으로 되돌렸습니다.' : '사용자 지정을 지웠습니다. XML에 없으면 잠금 상태입니다.') : (isSeq ? 'PC에 시퀀스 키와 간격을 저장했습니다. 게임의 실제 키와 맞춰 주세요.' : 'PC에 저장했습니다. 게임의 실제 키와 맞는지 확인하세요.');
   } catch(e){document.getElementById('keyMessage').textContent=e.message || 'PC 연결 실패';}
-  finally {K.busy=false;document.getElementById('keySection').disabled=false;document.getElementById('keyUnassigned').disabled=false;const b=selectedSetting();const s2=!!(b&&b.sequence);const locked=s2 ? (!b||b.unbound||!(b.steps||[]).length) : (!b || !b.action || !!b.blocked_reason);document.getElementById('keySave').disabled=locked;document.getElementById('keyReset').disabled=locked || (s2 ? !b?.custom_delays : !b?.override_keys);}
+  finally {K.busy=false;document.getElementById('keySection').disabled=false;document.getElementById('keyUnassigned').disabled=false;const b=selectedSetting();const s2=!!(b&&b.sequence);const locked=s2 ? (!b||!(b.steps||[]).length) : (!b || !b.action || !!b.blocked_reason);document.getElementById('keySave').disabled=locked;document.getElementById('keyReset').disabled=locked || (s2 ? !(b?.custom_delays||b?.custom_step_keys) : !b?.override_keys);}
 }
 const mainKeys=['',...Array.from({length:12},(_,i)=>'f'+(i+1)),...'0123456789',...'bcfghijklmnoprtuvxyz',
  'tab','enter','esc','backspace','delete','insert','home','end','pageup','pagedown','minus','equal','lbracket','rbracket','semicolon','apostrophe','comma','period','slash','backslash','backquote',
