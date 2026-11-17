@@ -571,7 +571,7 @@ function buildWheel(grid, page, wheelIds) {
       +`<title>${esc(b.label)} · ${esc(off?(b.disabled_reason||'키 지정 필요'):b.keys.toUpperCase())} · 전원 전환</title>`
       +`<path class="wseg" d="${d}"/><path class="bevel" d="${bevel}"/><g clip-path="url(#wside${i})"><path class="wfill" d="${d}"/></g>`
       +`<g transform="translate(${x} ${y}) rotate(${rot})"><text class="wtxt" y="1" font-size="11">${esc(b.label)}</text>`
-      +`<text class="wkey" y="12" font-size="7">${esc(off?'잠금':b.keys.length<=4?b.keys.toUpperCase():'XML')}</text></g></g>`;
+      +`<text class="wkey" y="12" font-size="7">${esc(off?'잠금':b.keys.length<=4?b.keys.toUpperCase():(b.keys_source==='override'?'사용자':'XML'))}</text></g></g>`;
   });
   const wrap = document.createElement('div');
   wrap.id = 'wheelWrap';
@@ -722,7 +722,7 @@ function drawKeyEditor() {
   const isSeq=!!(b && b.sequence);
   document.getElementById('keyButtonName').textContent=b?.label || '버튼을 선택하세요';
   document.getElementById('keyCurrent').textContent=b ? '현재: '+sourceLabel(b) : '';
-  document.getElementById('keyMessage').textContent=b?.xml_only?'XML 전용 바로가기 · 전력·시스템의 전원 버튼과 같은 게임 액션입니다.':(b?.blocked_reason || '');
+  document.getElementById('keyMessage').textContent=b?.shared_setting?'전력·시스템의 같은 전원 버튼과 키를 공유합니다. 어느 쪽에서 저장해도 함께 바뀝니다.':(b?.blocked_reason || '');
   const locked=isSeq ? (!b || !(b.steps||[]).length)
                      : (!b || !b.action || !!b.blocked_reason || !!b.xml_only);
   document.getElementById('keyMainLabel').style.display=isSeq?'none':'';

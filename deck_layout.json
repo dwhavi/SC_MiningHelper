@@ -282,8 +282,7 @@
           "action": "spaceship_power.v_power_toggle",
           "mode": "tap",
           "group": "전원 전환 · 꺼질 수 있음",
-          "caution": true,
-          "xml_only": true
+          "caution": true
         },
         {
           "id": "wheel-engine",
@@ -291,8 +290,7 @@
           "action": "spaceship_power.v_power_toggle_thrusters",
           "mode": "tap",
           "group": "전원 전환 · 꺼질 수 있음",
-          "caution": true,
-          "xml_only": true
+          "caution": true
         }
       ],
       "wheel": {

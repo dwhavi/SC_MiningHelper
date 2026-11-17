@@ -1066,6 +1066,17 @@ def _run_sequence(cfg, btn):
         _seq_set(running=False, step=0)
 
 
+_POWER_ALIASES = {
+    "wheel-power": ("power-all", "spaceship_power.v_power_toggle"),
+    "wheel-engine": ("power-engine", "spaceship_power.v_power_toggle_thrusters"),
+}
+
+
+def _setting_id(btn):
+    target = _POWER_ALIASES.get(btn.get("id"))
+    return target[0] if target and btn.get("action") == target[1] else btn.get("id")
+
+
 def _resolved_deck_layout(cfg, overrides=None):
     """Fail closed: no guessed defaults or stale pre-v4 user layouts."""
     user_path = os.path.join(EXE_DIR, "deck_layout.json")
@@ -1114,7 +1125,11 @@ def _resolved_deck_layout(cfg, overrides=None):
             _resolve_sequence(btn, bindings, owners, overrides)
             continue
         act = btn.get("action") or ""
-        custom = overrides.get(btn.get("id"), {})
+        setting_id = _setting_id(btn)
+        if setting_id != btn.get("id"):
+            btn.pop("xml_only", None)  # Upgrade previous bundled/custom v4 shortcuts in memory.
+            btn["shared_setting"] = setting_id
+        custom = overrides.get(setting_id, {})
         use_override = not btn.get("xml_only") and isinstance(custom, dict) and custom.get("action") == act and bool(custom.get("keys"))
         key = custom.get("keys", "") if use_override else bindings.get(act, "")
         btn["override_keys"] = key if use_override else ""
@@ -1364,6 +1379,9 @@ def create_app(state, cfg):
                 return JSONResponse({"msg": "이 버튼은 변경할 수 없습니다"}, status_code=400)
             btn = matches[0]
             overrides = _read_key_overrides()
+            setting_id = _setting_id(btn)
+            if setting_id != btn.get("id"):
+                overrides.pop(btn["id"], None)
             if btn.get("sequence"):
                 steps = btn.get("steps") or []
                 if not steps:
@@ -1402,13 +1420,13 @@ def create_app(state, cfg):
                     key = _validate_override_key(body.keys, btn.get("mode", "tap"))
                 except ValueError as e:
                     return JSONResponse({"msg": str(e)}, status_code=400)
-                overrides[body.button_id] = {"keys": key, "action": btn["action"]}
+                overrides[setting_id] = {"keys": key, "action": btn["action"]}
                 proposed = _resolved_deck_layout(cfg, overrides)
                 candidate = next(b for b in _deck_buttons(proposed) if b.get("id") == body.button_id)
                 if candidate.get("unbound"):
                     return JSONResponse({"msg": candidate.get("disabled_reason", "키 확인 필요")}, status_code=400)
             else:
-                overrides.pop(body.button_id, None)
+                overrides.pop(setting_id, None)
             try:
                 _write_key_overrides(overrides)
             except OSError:

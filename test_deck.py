@@ -442,17 +442,41 @@ class DeckTests(unittest.TestCase):
             m._trace_input(vk=165,result=0)
             self.assertTrue(Path(str(p)+'.1').exists())
             self.assertLess(p.stat().st_size,1024)
-    def test_wheel_power_xml_only_and_shared_actions(self):
+    def test_wheel_power_xml_fallback_and_shared_actions(self):
         self.xml('<ActionMaps><actionmap name="spaceship_power"><action name="v_power_toggle"><rebind input="kb1_u"/></action><action name="v_power_toggle_thrusters"><rebind input="kb1_i"/></action></actionmap></ActionMaps>')
         d=self.client.get('/api/layout').json();ship=next(p for p in d['pages'] if p['id']=='ship')
         self.assertEqual(ship['wheel']['footer'],['wheel-power','wheel-engine'])
         for bid,key in [('wheel-power','u'),('wheel-engine','i')]:
             b=next(b for b in ship['buttons'] if b['id']==bid)
             self.assertFalse(b['unbound']);self.assertEqual(b['keys'],key)
-            self.assertEqual(self.client.post('/api/key-settings',headers=self.headers,json={'button_id':bid,'keys':'f5'}).status_code,400)
         self.cfg['actionmaps_path']='';m._AM_CACHE['path']=None
         d=self.client.get('/api/layout').json()
         for b in m._deck_buttons(d):
             if b['id'] in ('wheel-power','wheel-engine'):self.assertTrue(b['unbound'])
+
+    def test_power_alias_edit_both_locations_and_reset(self):
+        for alias,target,key in [('wheel-power','power-all','u'),('wheel-engine','power-engine','i')]:
+            r=self.client.post('/api/key-settings',headers=self.headers,json={'button_id':target,'keys':key})
+            self.assertEqual(r.status_code,200,r.text)
+            buttons={b['id']:b for b in m._deck_buttons(r.json()['layout'])}
+            self.assertEqual(buttons[alias]['keys'],key);self.assertFalse(buttons[alias]['unbound'])
+            self.assertEqual(buttons[alias]['shared_setting'],target)
+            r=self.client.post('/api/key-settings',headers=self.headers,json={'button_id':alias,'keys':'f5'})
+            self.assertEqual(r.status_code,200,r.text)
+            buttons={b['id']:b for b in m._deck_buttons(r.json()['layout'])}
+            self.assertEqual(buttons[target]['keys'],'f5');self.assertEqual(buttons[alias]['keys'],'f5')
+            saved=m._read_key_overrides();self.assertNotIn(alias,saved);self.assertEqual(saved[target]['keys'],'f5')
+            self.client.post('/api/key-settings',headers=self.headers,json={'button_id':alias})
+            self.assertNotIn(target,m._read_key_overrides())
+    def test_power_alias_rejects_unrelated_action_conflicts(self):
+        self.client.post('/api/key-settings',headers=self.headers,json={'button_id':'weapons-increase','keys':'f5'})
+        r=self.client.post('/api/key-settings',headers=self.headers,json={'button_id':'wheel-power','keys':'f5'})
+        self.assertEqual(r.status_code,400,r.text)
+        self.assertNotIn('power-all',m._read_key_overrides())
+    def test_power_alias_same_action_duplicate_sends_once(self):
+        self.client.post('/api/key-settings',headers=self.headers,json={'button_id':'wheel-power','keys':'u'})
+        with patch.object(m,'_game_focused',return_value=True),patch.object(m,'_send_input',return_value=(True,'ok')) as send:
+            r=self.client.post('/api/input',headers=self.headers,json={'type':'press','key':'u'})
+            self.assertEqual(r.status_code,200,r.text);send.assert_called_once_with('press','u',0)
 
 if __name__=='__main__':unittest.main()
