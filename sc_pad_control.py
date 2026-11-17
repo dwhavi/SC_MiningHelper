@@ -836,6 +836,19 @@ def _read_key_overrides():
         return {}
 
 
+def _write_key_overrides(overrides):
+    """사용자 지정 키/시퀀스 간격을 exe 옆 JSON에 원자적으로 저장."""
+    import tempfile
+    fd, tmp = tempfile.mkstemp(prefix=".deck-keys-", suffix=".json", dir=EXE_DIR)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(overrides, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, _override_path())
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
 def _validate_override_key(key, mode="tap"):
     if len(key) > 64 or any(c in key for c in (";", ",", "\n", "\r")):
         raise ValueError("단일 키 또는 조합키만 지원합니다")
@@ -857,6 +870,144 @@ def _validate_override_key(key, mode="tap"):
     if mode == "hold" and main in (0x1004, 0x1005):
         raise ValueError("휠은 누르는 동안 유지할 수 없습니다")
     return key.strip().lower()
+
+
+# 시간텀 시퀀스 — 단계별 지연/홀드 상한. 1회 실행만, 반복 없음
+_SEQ_MIN_DELAY_MS = 200
+_SEQ_MAX_DELAY_MS = 10000
+_SEQ_MAX_STEPS = 8
+_SEQ_MAX_HOLD_MS = 5000
+
+
+def _resolve_sequence(btn, bindings, owners, overrides):
+    """시간텀 시퀀스 버튼: 단계 키는 XML에서 확인된 것만. 하나라도 없으면 잠금."""
+    approved = {
+        "launch-seq": ["spaceship_movement.v_atc_request", "spaceship_movement.v_strafe_up",
+                       "spaceship_movement.v_toggle_landing_system"],
+        "landing-seq": ["spaceship_docking.v_toggle_docking_request",
+                        "spaceship_movement.v_toggle_landing_system"],
+    }
+    raw = btn.get("sequence") or []
+    if (not isinstance(raw, list) or any(not isinstance(st, dict) for st in raw)
+            or [st.get("action") for st in raw] != approved.get(btn.get("id"))):
+        btn["disabled_reason"] = "승인된 시퀀스 정의가 아닙니다"
+        return
+    steps = []
+    custom = overrides.get(btn.get("id"), {})
+    saved = (custom.get("delays") if isinstance(custom, dict)
+             and custom.get("action") == "sequence" else None)
+    for i, st in enumerate(btn.get("sequence") or []):
+        if not isinstance(st, dict):
+            continue
+        try:
+            delay = int(st.get("delay_ms", 1000))
+            hold = int(st.get("hold_ms", 0))
+        except (TypeError, ValueError):
+            continue
+        if (isinstance(saved, list) and len(saved) == len(raw)
+                and all(type(d) is int and _SEQ_MIN_DELAY_MS <= d <= _SEQ_MAX_DELAY_MS for d in saved)):
+            delay = saved[i]
+        else:
+            saved = None
+        if st.get("action") != "spaceship_movement.v_strafe_up":
+            hold = 0
+        key = bindings.get(str(st.get("action") or ""), "")
+        steps.append({"label": str(st.get("label") or f"{i + 1}단계"),
+                      "action": str(st.get("action") or ""), "key": key,
+                      "delay_ms": min(max(delay, _SEQ_MIN_DELAY_MS), _SEQ_MAX_DELAY_MS),
+                      "hold_ms": min(max(hold, 0), _SEQ_MAX_HOLD_MS)})
+    btn["steps"] = steps
+    if not steps or len(steps) > _SEQ_MAX_STEPS:
+        btn["disabled_reason"] = "시퀀스 정의 확인 필요"
+        return
+    missing = [s["label"] for s in steps if not s["key"]]
+    if missing:
+        btn["disabled_reason"] = "시퀀스 키 지정 필요: " + ", ".join(missing)
+        return
+    try:
+        for s in steps:
+            combo = _combo_id(s["key"])
+            if s["key"].lower() in {"w", "a", "s", "d", "q", "e", "space", "up", "down", "left", "right"} and not (
+                    s["action"] == "spaceship_movement.v_strafe_up" and s["key"].lower() == "space"):
+                btn["disabled_reason"] = "이동 키 제외"
+                return
+            if len(owners.get(combo, set())) > 1:
+                btn["disabled_reason"] = "XML 키 중복 · 확인 필요"
+                return
+    except ValueError:
+        btn["disabled_reason"] = "시퀀스 키 확인 필요"
+        return
+    btn.update(keys="SEQ", unbound=False, keys_source="sequence",
+               disabled_reason="", custom_delays=bool(saved))
+
+
+# 시간텀 시퀀스 실행 상태 — 단일 실행, 취소/포커스 확인 내장
+_DECK_INPUT_LOCK = threading.RLock()
+_SEQ_LOCK = threading.Lock()
+_SEQ_ABORT = threading.Event()
+_SEQ_STATE = {"running": False, "button_id": "", "step": 0, "total": 0,
+              "label": "", "msg": ""}
+
+
+def _seq_set(**kw):
+    with _SEQ_LOCK:
+        _SEQ_STATE.update(kw)
+
+
+def _seq_running():
+    with _SEQ_LOCK:
+        return _SEQ_STATE["running"]
+
+
+def _run_sequence(cfg, btn):
+    """단계별 탭/홀드 전송. 매 단계 전에 취소 여부와 게임 포커스를 다시 확인한다."""
+    steps = list(btn.get("steps") or [])
+    _seq_set(running=True, button_id=btn.get("id", ""), step=0,
+             total=len(steps), label=btn.get("label", ""), msg="")
+    try:
+        for i, st in enumerate(steps):
+            if _SEQ_ABORT.is_set():
+                _seq_set(msg="취소했습니다")
+                return
+            if not _game_focused():
+                _seq_set(msg="게임 창이 앞에 없어 중단했습니다")
+                return
+            _seq_set(step=i + 1)
+            try:
+                if st.get("hold_ms"):
+                    _combo_down(st["key"])
+                    try:
+                        remaining = st["hold_ms"] / 1000.0
+                        while remaining > 0:
+                            dt = min(0.05, remaining)
+                            if _SEQ_ABORT.wait(dt):
+                                _seq_set(msg="취소했습니다")
+                                return
+                            if not _game_focused():
+                                _seq_set(msg="게임 창이 앞에 없어 중단했습니다")
+                                return
+                            remaining -= dt
+                    finally:
+                        _combo_up(st["key"])
+                else:
+                    _combo_press(st["key"])
+            except OSError as e:
+                _seq_set(msg=str(e))
+                return
+            wait = st.get("delay_ms", 0) / 1000.0
+            while wait > 0 and not _SEQ_ABORT.is_set():
+                dt = min(0.05, wait)
+                if _SEQ_ABORT.wait(dt):
+                    break
+                if not _game_focused():
+                    _seq_set(msg="게임 창이 앞에 없어 중단했습니다")
+                    return
+                wait -= dt
+        _seq_set(msg="취소했습니다" if _SEQ_ABORT.is_set()
+                 else f"{btn.get('label', '시퀀스')} 입력 전송 완료 (게임 완료 확인 아님)")
+    finally:
+        _SEQ_ABORT.clear()
+        _seq_set(running=False, step=0)
 
 
 def _resolved_deck_layout(cfg, overrides=None):
@@ -903,6 +1054,9 @@ def _resolved_deck_layout(cfg, overrides=None):
         if btn.get("id") == "escape" and btn.get("fixed_key") == "esc":
             btn.update(keys="esc", unbound=False, keys_source="fixed")
             continue
+        if btn.get("sequence"):
+            _resolve_sequence(btn, bindings, owners, overrides)
+            continue
         act = btn.get("action") or ""
         custom = overrides.get(btn.get("id"), {})
         use_override = isinstance(custom, dict) and custom.get("action") == act and bool(custom.get("keys"))
@@ -933,6 +1087,8 @@ def _resolved_deck_layout(cfg, overrides=None):
         btn.update(keys=key, unbound=False, keys_source="override" if use_override else "actionmaps")
     effective = {}
     for btn in _deck_buttons(layout):
+        if btn.get("sequence"):
+            continue
         if not btn.get("unbound") and btn.get("keys"):
             effective.setdefault(_combo_id(btn["keys"]), []).append(btn)
     for buttons in effective.values():
@@ -1045,7 +1201,7 @@ def create_app(state, cfg):
     """
     from fastapi import FastAPI, Request
     from fastapi.responses import HTMLResponse, JSONResponse
-    from pydantic import BaseModel
+    from pydantic import BaseModel, StrictInt
 
     class InputRequest(BaseModel):
         type: str                      # press/tap | timed/hold | down/up/refresh
@@ -1055,6 +1211,10 @@ def create_app(state, cfg):
     class KeySetting(BaseModel):
         button_id: str
         keys: str = ""
+        delays: list[StrictInt] | None = None   # 시퀀스 버튼의 단계별 간격(ms)
+
+    class SeqRequest(BaseModel):
+        button_id: str
 
     class TestInput(BaseModel):
         rs: int | None = None
@@ -1123,11 +1283,27 @@ def create_app(state, cfg):
         with _KEY_SETTINGS_LOCK:
             layout = _resolved_deck_layout(cfg)
             matches = [b for b in _deck_buttons(layout) if b.get("id") == body.button_id]
-            if len(matches) != 1 or not matches[0].get("action") or matches[0].get("blocked_reason"):
+            if len(matches) != 1 or matches[0].get("blocked_reason"):
                 return JSONResponse({"msg": "이 버튼은 변경할 수 없습니다"}, status_code=400)
             btn = matches[0]
             overrides = _read_key_overrides()
-            if body.keys.strip():
+            if btn.get("sequence"):
+                if body.delays is not None:
+                    steps = btn.get("steps") or []
+                    if (len(body.delays) != len(steps)
+                            or any(not isinstance(d, int) or isinstance(d, bool)
+                                   or d < _SEQ_MIN_DELAY_MS or d > _SEQ_MAX_DELAY_MS
+                                   for d in body.delays)):
+                        return JSONResponse(
+                            {"msg": f"단계 간격은 {_SEQ_MIN_DELAY_MS}~{_SEQ_MAX_DELAY_MS}ms, "
+                                    "단계 수와 같아야 합니다"}, status_code=400)
+                    overrides[body.button_id] = {"action": "sequence",
+                                                 "delays": [int(d) for d in body.delays]}
+                else:
+                    overrides.pop(body.button_id, None)
+            elif not btn.get("action"):
+                return JSONResponse({"msg": "이 버튼은 변경할 수 없습니다"}, status_code=400)
+            elif body.keys.strip():
                 try:
                     key = _validate_override_key(body.keys, btn.get("mode", "tap"))
                 except ValueError as e:
@@ -1140,15 +1316,7 @@ def create_app(state, cfg):
             else:
                 overrides.pop(body.button_id, None)
             try:
-                import tempfile
-                fd, tmp = tempfile.mkstemp(prefix=".deck-keys-", suffix=".json", dir=EXE_DIR)
-                try:
-                    with os.fdopen(fd, "w", encoding="utf-8") as f:
-                        json.dump(overrides, f, ensure_ascii=False, indent=2)
-                    os.replace(tmp, _override_path())
-                finally:
-                    if os.path.exists(tmp):
-                        os.unlink(tmp)
+                _write_key_overrides(overrides)
             except OSError:
                 return JSONResponse({"msg": "PC 설정 저장 실패 · 쓰기 가능한 폴더를 확인하세요"}, status_code=500)
             return {"ok": True, "layout": _resolved_deck_layout(cfg)}
@@ -1159,34 +1327,95 @@ def create_app(state, cfg):
         deny = _check_pair(request)
         if deny is not None:
             return deny
-        action = body.type
-        if action not in ("up", "release", "refresh") \
-                and cfg.get("only_when_game_focused", True) \
-                and not _game_focused():
-            return JSONResponse(
-                {"ok": False, "error": "game_not_focused",
-                 "msg": "게임 창이 앞에 있을 때만 전송됨"}, status_code=409)
-        if action not in ("up", "release"):
+        with _DECK_INPUT_LOCK:
+            action = body.type
+            if action not in ("up", "release", "refresh") \
+                    and cfg.get("only_when_game_focused", True) \
+                    and not _game_focused():
+                return JSONResponse(
+                    {"ok": False, "error": "game_not_focused",
+                     "msg": "게임 창이 앞에 있을 때만 전송됨"}, status_code=409)
+            if action not in ("up", "release", "refresh") and _seq_running():
+                return JSONResponse({"ok": False, "msg": "시퀀스 실행 중 · 끝난 뒤 다시 누르세요"},
+                                    status_code=409)
+            if action not in ("up", "release"):
+                layout = _resolved_deck_layout(cfg)
+                allowed = False
+                try:
+                    combo = _combo_id(body.key)
+                    for btn in _deck_buttons(layout):
+                        if btn.get("sequence") or btn.get("unbound") or not btn.get("keys"):
+                            continue
+                        if _combo_id(btn["keys"]) != combo:
+                            continue
+                        mode = btn.get("mode", "tap")
+                        if ((mode == "tap" and action in ("press", "tap")) or
+                                (mode == "hold" and action in ("down", "refresh"))):
+                            allowed = True
+                            break
+                except ValueError:
+                    pass
+                if not allowed:
+                    return JSONResponse({"ok": False, "msg": "키 지정 필요 또는 허용되지 않은 입력"}, status_code=400)
+            ok, msg = _send_input(action, body.key, body.ms)
+            return JSONResponse({"ok": ok, "msg": msg}, status_code=200 if ok else 400)
+
+    @app.post("/api/sequence")
+    def run_sequence(body: SeqRequest, request: Request):
+        """시간텀 시퀀스 시작. 단일 실행 · 매 단계 포커스 재확인 · 취소 가능."""
+        deny = _check_pair(request)
+        if deny is not None:
+            return deny
+        with _DECK_INPUT_LOCK:
             layout = _resolved_deck_layout(cfg)
-            allowed = False
+            matches = [b for b in _deck_buttons(layout)
+                       if b.get("id") == body.button_id and b.get("sequence")]
+            if len(matches) != 1:
+                return JSONResponse({"ok": False, "msg": "시퀀스 버튼이 아닙니다"}, status_code=400)
+            btn = matches[0]
+            if btn.get("unbound") or not btn.get("steps"):
+                return JSONResponse({"ok": False,
+                                     "msg": btn.get("disabled_reason", "시퀀스 키 지정 필요")},
+                                    status_code=400)
+            if _seq_running():
+                return JSONResponse({"ok": False, "msg": "다른 시퀀스 실행 중"}, status_code=409)
+            with _HOLD_LOCK:
+                if _ACTIVE_HOLDS:
+                    return JSONResponse({"ok": False,
+                                         "msg": "누르고 있는 키를 놓은 뒤 시작하세요"}, status_code=409)
+            if not _game_focused():
+                return JSONResponse(
+                    {"ok": False, "error": "game_not_focused",
+                     "msg": "게임 창이 앞에 있을 때만 전송됨"}, status_code=409)
+            with _SEQ_LOCK:
+                if _SEQ_STATE["running"]:
+                    return JSONResponse({"ok": False, "msg": "다른 시퀀스 실행 중"}, status_code=409)
+                _SEQ_ABORT.clear()
+                _SEQ_STATE.update(running=True, button_id=btn["id"], step=0,
+                                  total=len(btn["steps"]), label=btn.get("label", ""), msg="")
             try:
-                combo = _combo_id(body.key)
-                for btn in _deck_buttons(layout):
-                    if btn.get("unbound") or not btn.get("keys"):
-                        continue
-                    if _combo_id(btn["keys"]) != combo:
-                        continue
-                    mode = btn.get("mode", "tap")
-                    if ((mode == "tap" and action in ("press", "tap")) or
-                            (mode == "hold" and action in ("down", "refresh"))):
-                        allowed = True
-                        break
-            except ValueError:
-                pass
-            if not allowed:
-                return JSONResponse({"ok": False, "msg": "키 지정 필요 또는 허용되지 않은 입력"}, status_code=400)
-        ok, msg = _send_input(action, body.key, body.ms)
-        return JSONResponse({"ok": ok, "msg": msg}, status_code=200 if ok else 400)
+                threading.Thread(target=_run_sequence, args=(cfg, btn), daemon=True).start()
+            except RuntimeError:
+                _seq_set(running=False, msg="실행을 시작하지 못했습니다")
+                return JSONResponse({"ok": False, "msg": "실행 시작 실패"}, status_code=500)
+            return {"ok": True, "total": len(btn["steps"])}
+
+    @app.get("/api/sequence")
+    def sequence_status(request: Request):
+        deny = _check_pair(request)
+        if deny is not None:
+            return deny
+        with _SEQ_LOCK:
+            return dict(_SEQ_STATE)
+
+    @app.post("/api/sequence-cancel")
+    def cancel_sequence(request: Request):
+        """시퀀스 중단은 release처럼 항상 통과."""
+        deny = _check_pair(request)
+        if deny is not None:
+            return deny
+        _SEQ_ABORT.set()
+        return {"ok": True}
 
     @app.post("/api/test")
     def test_input(body: TestInput, request: Request):

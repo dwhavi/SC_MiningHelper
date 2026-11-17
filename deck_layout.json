@@ -181,6 +181,54 @@
           "keys": ""
         },
         {
+          "id": "night-vision",
+          "label": "나이트 비전",
+          "action": "seat_general.v_light_amplification_toggle",
+          "group": "출발 · 착륙",
+          "mode": "tap",
+          "keys": ""
+        },
+        {
+          "id": "launch-seq",
+          "label": "LAUNCH",
+          "sub": "SEQUENCE",
+          "group": "출발 · 착륙",
+          "sequence": [
+            {
+              "action": "spaceship_movement.v_atc_request",
+              "label": "격납고 요청",
+              "delay_ms": 2000
+            },
+            {
+              "action": "spaceship_movement.v_strafe_up",
+              "label": "함선 띄우기",
+              "hold_ms": 1500,
+              "delay_ms": 1000
+            },
+            {
+              "action": "spaceship_movement.v_toggle_landing_system",
+              "label": "랜딩기어 수납"
+            }
+          ]
+        },
+        {
+          "id": "landing-seq",
+          "label": "LANDING",
+          "sub": "SEQUENCE",
+          "group": "출발 · 착륙",
+          "sequence": [
+            {
+              "action": "spaceship_docking.v_toggle_docking_request",
+              "label": "도킹 요청",
+              "delay_ms": 1500
+            },
+            {
+              "action": "spaceship_movement.v_toggle_landing_system",
+              "label": "랜딩기어"
+            }
+          ]
+        },
+        {
           "id": "scm",
           "label": "SCM 선택",
           "action": "spaceship_movement.v_master_mode_set_scm",
@@ -228,7 +276,18 @@
           "mode": "hold",
           "keys": ""
         }
-      ]
+      ],
+      "wheel": {
+        "center": "ready",
+        "segments": [
+          "launch-seq",
+          "night-vision",
+          "gear",
+          "landing-seq",
+          "vtol",
+          "ship-light"
+        ]
+      }
     },
     {
       "id": "power",

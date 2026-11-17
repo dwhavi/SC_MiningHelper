@@ -195,6 +195,58 @@
              border-color:transparent; font-weight:700; }
   .settings-actions button:disabled { opacity:.4; cursor:not-allowed; }
   #keyMessage { font-size:12px; line-height:1.5; color:#e7be91; margin-top:12px; min-height:18px; }
+  /* 네온 + 채움 피드백: 누르면 색이 차오르고 놓으면 서서히 내려감 */
+  .btn::after { content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none;
+    background:linear-gradient(180deg, rgba(70,200,230,.06), rgba(70,200,230,.38));
+    transform:translateY(102%); opacity:0; transition:transform .45s ease-in, opacity .45s ease-in; }
+  .btn.active::after { transform:translateY(0); opacity:1;
+    transition:transform .12s ease-out, opacity .12s ease-out; }
+  .btn.caution::after { background:linear-gradient(180deg, rgba(240,168,110,.06), rgba(240,168,110,.4)); }
+  .btn.gray::after { display:none; }
+  .btn.active { box-shadow:0 0 0 1px rgba(70,200,230,.5), 0 0 26px rgba(70,200,230,.35),
+    0 0 60px rgba(70,200,230,.16), inset 0 1px 0 rgba(255,255,255,.06); }
+  /* 레이디얼 휠 */
+  #wheelWrap { display:flex; justify-content:center; padding:10px 14px 4px; }
+  svg.wheel { width:min(100%,560px); height:auto; overflow:visible; touch-action:none; }
+  .wseg { fill:url(#segGrad); stroke:rgba(110,168,198,.30); stroke-width:1.5; }
+  .wcenter { fill:url(#ctrGrad); stroke:rgba(140,235,255,.75); stroke-width:2; }
+  .wfill { fill:rgba(70,200,230,.32); transform:translateY(640px); opacity:0; pointer-events:none;
+    transition:transform .45s ease-in, opacity .45s ease-in; }
+  .wb.seq .wfill { fill:rgba(240,168,110,.35); }
+  .wb { cursor:pointer; }
+  .wb.active .wseg { stroke:rgba(140,235,255,.95);
+    filter:drop-shadow(0 0 14px rgba(70,200,230,.75)) drop-shadow(0 0 42px rgba(70,200,230,.35)); }
+  .wb.active .wcenter { filter:drop-shadow(0 0 18px rgba(70,200,230,.85)) drop-shadow(0 0 60px rgba(70,200,230,.4)); }
+  .wb.active .wfill { transform:translateY(0); opacity:1;
+    transition:transform .12s ease-out, opacity .12s ease-out; }
+  .wb.seq .wseg { stroke:rgba(240,168,110,.5); }
+  .wb.seq.active .wseg { stroke:rgba(255,190,130,.95);
+    filter:drop-shadow(0 0 14px rgba(240,168,110,.8)) drop-shadow(0 0 42px rgba(240,168,110,.4)); }
+  .wb.off { cursor:not-allowed; }
+  .wb.off .wseg, .wb.off .wcenter { fill:rgba(20,30,42,.45); stroke:rgba(110,168,198,.14); filter:none; }
+  .wb.off .wtxt { fill:#5b6b7a; } .wb.off .wsub { fill:#5b6b7a; } .wb.off .wkey { fill:#7d8b98; }
+  .wtxt { fill:#eaf2f9; font-weight:600; text-anchor:middle; pointer-events:none; }
+  .wsub { fill:#dcb298; font-weight:600; text-anchor:middle; pointer-events:none; }
+  .wkey { fill:var(--accent-2); font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+    text-anchor:middle; letter-spacing:1px; pointer-events:none; }
+  .wb.seq .wkey { fill:#f0b98d; }
+  .wctext { fill:#eafcff; font-weight:800; text-anchor:middle; letter-spacing:2px; pointer-events:none;
+    text-shadow:0 0 16px rgba(70,200,230,.8); }
+  #seqBar { position:fixed; bottom:10px; left:0; right:0; z-index:8; box-shadow:0 0 30px #000; display:none; align-items:center; gap:10px; margin:8px 14px 0; padding:10px 14px;
+    border:1px solid rgba(240,168,110,.4); background:linear-gradient(180deg,#241a12,#1b1512);
+    border-radius:12px; font-size:13px; color:#f3cdb2; }
+  #seqBar.show { display:flex; }
+  #seqCancel { margin-left:auto; padding:9px 20px; border-radius:999px; cursor:pointer;
+    border:1px solid rgba(240,168,110,.6); background:linear-gradient(180deg,#4a2e1e,#33200f);
+    color:#ffd9b8; font-weight:700; font-size:14px; }
+  /* 키 설정 팝업의 시퀀스 간격 편집 */
+  #seqSteps { display:flex; flex-direction:column; gap:8px; margin:10px 0; }
+  #seqSteps .step-row { display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center;
+    background:#101f2b; border:1px solid rgba(90,140,170,.22); border-radius:8px; padding:8px 10px; }
+  #seqSteps .step-row .nm { font-size:13px; } #seqSteps .step-row .ky { font-size:11px; color:#9bb2c5;
+    font-family:ui-monospace,Menlo,Consolas,monospace; }
+  #seqSteps input { width:110px; background:#0a131c; border:1px solid rgba(90,140,170,.35); color:var(--fg);
+    border-radius:6px; padding:7px 8px; font-size:13px; text-align:right; }
   @media(max-width:600px) {
     #keyDialog { max-height:94dvh; }
     .settings-body { grid-template-columns:1fr; gap:12px; }
@@ -218,11 +270,12 @@
 <nav id="tabs" aria-label="덱 페이지"></nav>
 <section id="pageHeading"><div><h2 id="pageName"></h2><p id="pageDescription"></p></div><span id="pageCount"></span></section>
 <main id="grid"></main>
+<div id="seqBar" role="status"><span id="seqText"></span><button id="seqCancel" type="button">중단</button></div>
 <div class="row">
   <button class="btn gray" id="btnTest" type="button">오버레이 테스트</button>
   <button class="btn gray" id="btnClear" type="button">결과 지우기</button>
 </div>
-<div style="padding:0 12px 10px;color:#7e93a6;font-size:11px">입력 전용 · 게임 창이 앞에 있을 때만 전송 · 표시 색상은 게임 상태가 아닙니다</div>
+<div style="padding:0 12px 10px;color:#7e93a6;font-size:11px">입력 전용 · 표시 색상은 게임 상태가 아닙니다 · 시퀀스 자동 입력의 이용약관/안티치트 안전은 보장하지 않습니다</div>
 <div id="log" aria-live="polite"></div>
 
 <div id="pairOverlay">
@@ -235,7 +288,7 @@
 
 <dialog id="keyDialog" aria-labelledby="keyTitle">
   <div class="settings-head"><h2 id="keyTitle">덱 키 설정</h2><button class="settings-close" id="keyClose" type="button">닫기</button></div>
-  <p class="settings-note">게임의 키 설정은 바꾸지 않습니다. 게임에서 사용하는 키와 맞춰 지정하세요.<br>PC에 저장되며 다른 패드에도 적용됩니다. 이동 키·매크로는 지원하지 않습니다.</p>
+  <p class="settings-note">게임의 키 설정은 바꾸지 않습니다. 게임에서 사용하는 키와 맞춰 지정하세요.<br>PC에 저장되며 다른 패드에도 적용됩니다. 이동 키·임의 매크로는 지원하지 않습니다. LAUNCH/LANDING은 시간 간격 시퀀스이며 게임 완료 여부를 확인하지 못합니다.</p>
   <div class="settings-body">
     <section aria-label="버튼 선택">
       <label for="keySection">버튼 영역</label><select id="keySection"></select>
@@ -244,9 +297,10 @@
     </section>
     <section id="keyEditor" aria-label="키 편집">
       <h3 id="keyButtonName">버튼을 선택하세요</h3><div id="keyCurrent"></div>
-      <label for="keyMain">보낼 키</label><select id="keyMain"></select>
+      <label for="keyMain" id="keyMainLabel">보낼 키</label><select id="keyMain"></select>
       <div id="keyMods" aria-label="조합키 수식자"></div>
       <div id="keyPreview"></div>
+      <div id="seqSteps" style="display:none" aria-label="시퀀스 단계 간격"></div>
       <div class="settings-actions"><button id="keySave" type="button">이 키로 저장</button><button id="keyReset" type="button">XML로 되돌리기</button></div>
       <div id="keyMessage" role="status" aria-live="polite"></div>
     </section>
@@ -298,8 +352,8 @@ async function post(path, body, quiet) {
     if (r.status === 429) { if (!quiet) log('잠시 차단됨 (1분)', false); return 429; }
     const j = await r.json().catch(() => ({}));
     if (r.status === 409 || j.error === 'game_not_focused') {
-      flashFocus();
-      if (!quiet) log('게임 창이 앞에 없음', false);
+      if(j.error === 'game_not_focused') flashFocus();
+      log(j.msg || '실행할 수 없습니다', false);
       return 409;
     }
     if (!quiet) log(j.msg || (r.ok ? '전송됨' : '실패'), r.ok && j.ok !== false);
@@ -358,13 +412,18 @@ function render() {
   const grid = document.getElementById('grid');
   grid.replaceChildren();
   grid.className = page.id === 'power' ? 'power' : '';
+  const wheel = page.wheel || null;
+  const wheelIds = wheel ? new Set([wheel.center, ...(wheel.segments || [])]) : new Set();
+  if (wheel) buildWheel(grid, page, wheelIds);
   const groups = new Map();
   page.buttons.forEach(b => {
+    if (wheelIds.has(b.id)) return;
     const name = b.group || '버튼';
     if (!groups.has(name)) groups.set(name, []);
     groups.get(name).push(b);
   });
   groups.forEach((buttons, name) => {
+    if (!buttons.length) return;
     const group = document.createElement('section');
     group.className = 'group' + (buttons.some(b => b.caution) ? ' caution-zone' : '');
     const title = document.createElement('h3');
@@ -424,12 +483,160 @@ function bindButton(el, b) {
       setTimeout(() => el.classList.remove('active'), Math.min(b.ms || 1000, 1500));
     } else {
       sendInput('press', key);
-      setTimeout(() => el.classList.remove('active'), 130);
+      setTimeout(() => el.classList.remove('active'), 260);
     }
   });
   ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev =>
     el.addEventListener(ev, release));
 }
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* 레이디얼 휠: 6개 웨지(60°) + 중앙 버튼. 첫 웨지는 12시 방향 중앙. */
+function polar(cx, cy, r, deg) {
+  const a = deg * Math.PI / 180;
+  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+}
+function wedgeD(cx, cy, r0, r1, a0, a1) {
+  const p0 = polar(cx, cy, r0, a0), p1 = polar(cx, cy, r1, a0);
+  const p2 = polar(cx, cy, r1, a1), p3 = polar(cx, cy, r0, a1);
+  const f = v => v.toFixed(2);
+  return `M${f(p0[0])},${f(p0[1])} L${f(p1[0])},${f(p1[1])} A${r1},${r1} 0 0 1 ${f(p2[0])},${f(p2[1])} L${f(p3[0])},${f(p3[1])} A${r0},${r0} 0 0 0 ${f(p0[0])},${f(p0[1])} Z`;
+}
+function buildWheel(grid, page, wheelIds) {
+  const wheel = page.wheel || {};
+  const segs = (wheel.segments || []).map(id => page.buttons.find(b => b.id === id));
+  const center = page.buttons.find(b => b.id === wheel.center);
+  if (segs.length !== 6 || segs.some(s => !s) || !center) return;
+  const cx = 160, cy = 160, r0 = 58, r1 = 148, cr = r0 - 12;
+  let clip = '', body = '';
+  segs.forEach((b, i) => {
+    const a0 = -120 + i * 60, am = a0 + 30;
+    const d = wedgeD(cx, cy, r0, r1, a0, a0 + 60);
+    const [lx, ly] = polar(cx, cy, (r0 + r1) / 2, am).map(v => +v.toFixed(1));
+    const off = (b.unbound || !b.keys) ? ' off' : '';
+    const isSeq = !!b.sequence;
+    const keytxt = isSeq ? ((b.steps || []).length + '단계')
+                         : (b.keys ? b.keys.toUpperCase() : '키 필요');
+    clip += `<clipPath id="wc${i}"><path d="${d}"></path></clipPath>`;
+    body += `<g class="wb${isSeq ? ' seq' : ''}${off}" data-bid="${esc(b.id)}">`
+      + `<path class="wseg" d="${d}"></path>`
+      + `<g clip-path="url(#wc${i})"><path class="wfill" d="${d}"></path></g>`
+      + `<text class="wtxt" x="${lx}" y="${ly - 4}" font-size="13">${esc(b.label)}</text>`
+      + (isSeq ? `<text class="wsub" x="${lx}" y="${ly + 10}" font-size="9">SEQUENCE</text>` : '')
+      + `<text class="wkey" x="${lx}" y="${ly + (isSeq ? 24 : 12)}" font-size="9">${esc(keytxt)}</text></g>`;
+  });
+  const cOff = (center.unbound || !center.keys) ? ' off' : '';
+  clip += `<clipPath id="wcc"><circle cx="${cx}" cy="${cy}" r="${cr}"></circle></clipPath>`;
+  body += `<g class="wb${cOff}" data-bid="${esc(center.id)}">`
+    + `<circle class="wcenter" cx="${cx}" cy="${cy}" r="${cr}"></circle>`
+    + `<g clip-path="url(#wcc)"><circle class="wfill" cx="${cx}" cy="${cy}" r="${cr}"></circle></g>`
+    + `<text class="wctext" x="${cx}" y="${cy + 7}" font-size="18">${esc(center.label)}</text></g>`;
+  const wrap = document.createElement('div');
+  wrap.id = 'wheelWrap';
+  wrap.innerHTML = '<svg class="wheel" viewBox="0 0 320 320" role="group" aria-label="빠른 조작 휠"><defs>'
+    + '<radialGradient id="segGrad" cx="50%" cy="42%" r="75%">'
+    + '<stop offset="0%" stop-color="#182f3d"/><stop offset="100%" stop-color="#0d1b26"/></radialGradient>'
+    + '<radialGradient id="ctrGrad" cx="50%" cy="40%" r="70%">'
+    + '<stop offset="0%" stop-color="#1e3a4a"/><stop offset="100%" stop-color="#0c1820"/></radialGradient>'
+    + clip + '</defs>' + body + '</svg>';
+  grid.appendChild(wrap);
+  const byId = {};
+  [center, ...segs].forEach(b => { byId[b.id] = b; });
+  wrap.querySelectorAll('.wb').forEach(el => bindWheel(el, byId[el.dataset.bid]));
+}
+function bindWheel(el, b) {
+  if (!b) return;
+  if (b.unbound || !b.keys) {
+    el.addEventListener('click', () =>
+      log((b.label || '') + ': ' + (b.disabled_reason || '키 지정 필요'), false));
+    return;
+  }
+  if (b.sequence) {
+    el.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      startSequence(b, el);
+    });
+    return;
+  }
+  const key = b.keys, mode = b.mode || 'tap';
+  let holdTimer = null, holding = false;
+  const release = () => {
+    if (!holding) return;
+    holding = false;
+    clearInterval(holdTimer);
+    el.classList.remove('active');
+    delete S.holds[key];
+    sendInput('up', key).then(() => {});
+  };
+  window.addEventListener('deckrelease', release);
+  S.releases.push(release);
+  el.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    if (holding || el.classList.contains('active')) return;
+    el.classList.add('active');
+    if (mode === 'hold') {
+      holding = true;
+      S.holds[key] = true;
+      sendInput('down', key);
+      holdTimer = setInterval(() => sendInput('refresh', key), 2000);
+    } else if (mode === 'timed') {
+      sendInput('timed', key, b.ms || 1000);
+      setTimeout(() => el.classList.remove('active'), Math.min(b.ms || 1000, 1500));
+    } else {
+      sendInput('press', key);
+      setTimeout(() => el.classList.remove('active'), 260);
+    }
+  });
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(ev =>
+    el.addEventListener(ev, release));
+}
+
+/* 시간텀 시퀀스: 시작 → 상태 폴링 → 진행 표시줄. 중단은 언제나 가능. */
+let seqPoll = null, seqStarting = false, seqActive = false, seqWasActive = false;
+function seqBarShow(t) {
+  document.getElementById('seqText').textContent = t;
+  document.getElementById('seqBar').classList.add('show');
+}
+function seqBarHide() { document.getElementById('seqBar').classList.remove('show'); }
+async function checkSequence() {
+  if (!S.code || document.getElementById('pairOverlay').classList.contains('show')) return;
+  try {
+    const r = await fetch('/api/sequence', {headers: {'X-Pairing-Code': S.code}});
+    if (!r.ok) return;
+    const d = await r.json();
+    seqActive = !!d.running;
+    document.getElementById('settingsOpen').disabled=seqActive;
+    document.querySelectorAll('.wb.seq').forEach(el=>el.classList.toggle('active',seqActive && el.dataset.bid===d.button_id));
+    if (seqActive) {
+      if(keyDialog.open)keyDialog.close();
+      seqWasActive=true;
+      seqBarShow(`입력 전송 중 · ${d.step}/${d.total} · ${d.label || ''} (게임 완료 확인 아님)`);
+    } else if (seqWasActive) {
+      seqWasActive=false;seqBarHide();
+      if(d.msg)log(d.msg,d.msg.includes('완료'));
+    }
+  } catch(e) { /* Keep cancel visible if the network drops. */ }
+}
+async function startSequence(b, el) {
+  if (seqStarting || seqActive) return;
+  seqStarting=true;
+  const r = await post('/api/sequence', {button_id: b.id}, true);
+  seqStarting=false;
+  if (r !== 200) return;
+  seqActive=true;seqWasActive=true;
+  el.classList.add('active');
+  seqBarShow('입력 전송 시작 · ' + (b.label || b.id));
+  log('시퀀스 시작 · ' + (b.label || ''), true);
+  await checkSequence();
+}
+document.getElementById('seqCancel').addEventListener('click', async () => {
+  await post('/api/sequence-cancel', {}, true);
+  await checkSequence();
+});
 
 const K = {layout:null, selected:null, busy:false};
 const keyDialog = document.getElementById('keyDialog');
@@ -439,6 +646,10 @@ function settingGroups() {
     {name:'공통 바로가기',buttons:l.common_buttons || []}, ...(l.pages || [])];
 }
 function sourceLabel(b) {
+  if (b.sequence) {
+    if (b.unbound) return b.disabled_reason || '시퀀스 키 지정 필요';
+    return (b.steps || []).length + '단계 시퀀스 · XML' + (b.custom_delays ? ' · 간격 조정됨' : '');
+  }
   if (b.unbound || !b.keys) return b.disabled_reason || '키 지정 필요';
   return b.keys.toUpperCase() + (b.keys_source === 'override' ? ' · 사용자 지정' : b.keys_source === 'fixed' ? ' · 고정 키' : ' · XML');
 }
@@ -468,19 +679,40 @@ function previewSettingKey() {
 }
 function drawKeyEditor() {
   const b=selectedSetting();
+  const isSeq=!!(b && b.sequence);
   document.getElementById('keyButtonName').textContent=b?.label || '버튼을 선택하세요';
   document.getElementById('keyCurrent').textContent=b ? '현재: '+sourceLabel(b) : '';
   document.getElementById('keyMessage').textContent=b?.blocked_reason || '';
-  const locked=!b || !b.action || !!b.blocked_reason;
-  const parts=(b?.override_keys || b?.keys || '').split('+');const main=parts.pop();
-  document.getElementById('keyMain').value=main || '';
-  document.querySelectorAll('#keyMods input').forEach(e=>{e.checked=parts.includes(e.value);e.disabled=locked;});
+  const locked=isSeq ? (!b || b.unbound || !(b.steps||[]).length)
+                     : (!b || !b.action || !!b.blocked_reason);
+  document.getElementById('keyMainLabel').style.display=isSeq?'none':'';
+  document.getElementById('keyMain').style.display=isSeq?'none':'';
+  document.getElementById('keyMods').style.display=isSeq?'none':'';
+  document.getElementById('keyPreview').style.display=isSeq?'none':'';
+  const seqBox=document.getElementById('seqSteps');
+  if (isSeq) {
+    seqBox.style.display='';
+    seqBox.innerHTML=(b.steps||[]).map((s,i)=>
+      `<div class="step-row"><div><div class="nm">${i+1}. ${esc(s.label||'')}</div>`
+      +`<div class="ky">${esc(s.key||'')}</div></div>`
+      +`<input type="number" min="200" max="10000" step="100" value="${esc(String(s.delay_ms ?? 0))}" data-step="${i}" aria-label="${i+1}단계 뒤 대기(ms)"></div>`
+    ).join('')
+    +'<div style="font-size:11px;color:#8ea5b5;line-height:1.5">각 단계를 보낸 뒤 기다리는 시간 (200~10000ms). 게임 완료 여부는 확인되지 않으니 직접 맞춰 주세요.</div>';
+  } else {
+    seqBox.style.display='none';seqBox.innerHTML='';
+    const parts=(b?.override_keys || b?.keys || '').split('+');const main=parts.pop();
+    document.getElementById('keyMain').value=main || '';
+    document.querySelectorAll('#keyMods input').forEach(e=>{e.checked=parts.includes(e.value);e.disabled=locked;});
+    previewSettingKey();
+  }
+  document.getElementById('keySave').textContent=isSeq?'간격 저장':'이 키로 저장';
+  document.getElementById('keyReset').textContent=isSeq?'기본 간격':'XML로 되돌리기';
   document.getElementById('keyMain').disabled=locked;
   document.getElementById('keySave').disabled=locked;
-  document.getElementById('keyReset').disabled=locked || !b?.override_keys;
-  previewSettingKey();
+  document.getElementById('keyReset').disabled=locked || (isSeq ? !b?.custom_delays : !b?.override_keys);
 }
 async function openKeySettings() {
+  if(seqActive)return;
   releaseAll();
   try {
     const r=await fetch('/api/key-settings',{headers:{'X-Pairing-Code':S.code}});
@@ -494,17 +726,29 @@ async function openKeySettings() {
 }
 async function saveSetting(reset) {
   if(K.busy)return;const b=selectedSetting();if(!b)return;
-  const key=reset ? '' : previewSettingKey();
-  if(!reset && !document.getElementById('keyMain').value){document.getElementById('keyMessage').textContent='보낼 키를 선택하세요';return;}
+  const isSeq=!!b.sequence;
+  let payload;
+  if (isSeq) {
+    if (reset) { payload={button_id:b.id}; }
+    else {
+      const delays=[...document.querySelectorAll('#seqSteps input[data-step]')].map(e=>parseInt(e.value,10));
+      if(delays.some(d=>!Number.isFinite(d)||d<200||d>10000)){document.getElementById('keyMessage').textContent='간격은 200~10000ms 사이로 입력하세요';return;}
+      payload={button_id:b.id,delays};
+    }
+  } else {
+    const key=reset ? '' : previewSettingKey();
+    if(!reset && !document.getElementById('keyMain').value){document.getElementById('keyMessage').textContent='보낼 키를 선택하세요';return;}
+    payload={button_id:b.id,keys:key};
+  }
   K.busy=true;document.getElementById('keySection').disabled=true;document.getElementById('keyUnassigned').disabled=true;document.getElementById('keySave').disabled=true;document.getElementById('keyReset').disabled=true;
   try {
-    const r=await fetch('/api/key-settings',{method:'POST',headers:{'Content-Type':'application/json','X-Pairing-Code':S.code},body:JSON.stringify({button_id:b.id,keys:key})});
+    const r=await fetch('/api/key-settings',{method:'POST',headers:{'Content-Type':'application/json','X-Pairing-Code':S.code},body:JSON.stringify(payload)});
     const j=await r.json();
     if(!r.ok){if(r.status===401){keyDialog.close();showPair('다시 페어링하세요');}throw new Error(j.msg || '저장 실패');}
     releaseAll();K.layout=j.layout;S.layout=j.layout;render();drawKeyList();
-    document.getElementById('keyMessage').textContent=reset ? '사용자 지정을 지웠습니다. XML에 없으면 잠금 상태입니다.' : 'PC에 저장했습니다. 게임의 실제 키와 맞는지 확인하세요.';
+    document.getElementById('keyMessage').textContent=reset ? (isSeq ? '기본 간격으로 되돌렸습니다.' : '사용자 지정을 지웠습니다. XML에 없으면 잠금 상태입니다.') : (isSeq ? 'PC에 간격을 저장했습니다. 게임에서 직접 확인해 보세요.' : 'PC에 저장했습니다. 게임의 실제 키와 맞는지 확인하세요.');
   } catch(e){document.getElementById('keyMessage').textContent=e.message || 'PC 연결 실패';}
-  finally {K.busy=false;document.getElementById('keySection').disabled=false;document.getElementById('keyUnassigned').disabled=false;const b=selectedSetting();const locked=!b || !b.action || !!b.blocked_reason;document.getElementById('keySave').disabled=locked;document.getElementById('keyReset').disabled=locked || !b?.override_keys;}
+  finally {K.busy=false;document.getElementById('keySection').disabled=false;document.getElementById('keyUnassigned').disabled=false;const b=selectedSetting();const s2=!!(b&&b.sequence);const locked=s2 ? (!b||b.unbound||!(b.steps||[]).length) : (!b || !b.action || !!b.blocked_reason);document.getElementById('keySave').disabled=locked;document.getElementById('keyReset').disabled=locked || (s2 ? !b?.custom_delays : !b?.override_keys);}
 }
 const mainKeys=['',...Array.from({length:12},(_,i)=>'f'+(i+1)),...'0123456789',...'bcfghijklmnoprtuvxyz',
  'tab','enter','esc','backspace','delete','insert','home','end','pageup','pagedown','minus','equal','lbracket','rbracket','semicolon','apostrophe','comma','period','slash','backslash','backquote',
@@ -550,6 +794,8 @@ document.addEventListener('contextmenu', e => e.preventDefault());
   render();
   const a = await post('/api/auth', null, true);
   if (a !== 200) showPair('PC 제어 창의 페어링 코드를 입력하세요');
+  seqPoll=setInterval(checkSequence,500);
+  checkSequence();
 })();
 </script>
 </body>

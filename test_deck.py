@@ -7,6 +7,16 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 import sc_pad_control as m
 
+_SEQ_XML = ('<ActionMaps>'
+            '<actionmap name="spaceship_movement">'
+            '<action name="v_atc_request"><rebind input="kb1_lalt+n"/></action>'
+            '<action name="v_strafe_up"><rebind input="kb1_space"/></action>'
+            '<action name="v_toggle_landing_system"><rebind input="kb1_k"/></action>'
+            '</actionmap>'
+            '<actionmap name="spaceship_docking">'
+            '<action name="v_toggle_docking_request"><rebind input="kb1_lalt+d"/></action>'
+            '</actionmap></ActionMaps>')
+
 class DeckTests(unittest.TestCase):
     def setUp(self):
         self.cfg = dict(m.DEFAULTS, pairing_code='123456')
@@ -20,6 +30,8 @@ class DeckTests(unittest.TestCase):
         self.override_patch.stop()
         self.tmp.cleanup()
         m._ACTIVE_HOLDS.clear()
+        m._SEQ_ABORT.clear()
+        m._seq_set(running=False)
     def xml(self, text):
         path=Path(self.tmp.name)/'actionmaps.xml';path.write_text(text)
         self.cfg['actionmaps_path']=str(path)
@@ -235,5 +247,134 @@ class DeckTests(unittest.TestCase):
         old=self.state.get()
         self.client.get('/api/auth',headers=self.headers)
         self.assertEqual(self.state.get(),old)
+
+    def _seq_button(self, bid='launch-seq'):
+        d = self.client.get('/api/layout').json()
+        ship = [p for p in d['pages'] if p['id'] == 'ship'][0]
+        return [b for b in ship['buttons'] if b['id'] == bid][0]
+    def _wait_seq_done(self, timeout=5.0):
+        import time as _t
+        end = _t.time() + timeout
+        while _t.time() < end:
+            d = self.client.get('/api/sequence', headers=self.headers).json()
+            if not d.get('running'):
+                return d
+            _t.sleep(0.02)
+        self.fail('sequence did not finish')
+
+    def test_sequence_locked_without_xml(self):
+        b = self._seq_button()
+        self.assertTrue(b['unbound'])
+        self.assertIn('시퀀스 키 지정 필요', b['disabled_reason'])
+    def test_sequence_resolves_from_xml(self):
+        self.xml(_SEQ_XML)
+        b = self._seq_button()
+        self.assertFalse(b['unbound'])
+        self.assertEqual(b['keys'], 'SEQ')
+        self.assertEqual([s['key'] for s in b['steps']], ['lalt+n', 'space', 'k'])
+        self.assertEqual(b['steps'][1]['hold_ms'], 1500)
+        landing = self._seq_button('landing-seq')
+        self.assertEqual([s['key'] for s in landing['steps']], ['lalt+d', 'k'])
+    def test_sequence_run_order_and_completion(self):
+        self.xml(_SEQ_XML)
+        calls = []
+        with patch.object(m, '_game_focused', return_value=True), \
+             patch.object(m, '_combo_press', side_effect=lambda k: calls.append(('press', k))), \
+             patch.object(m, '_combo_down', side_effect=lambda k: calls.append(('down', k))), \
+             patch.object(m, '_combo_up', side_effect=lambda k: calls.append(('up', k))), \
+             patch.object(m.time, 'sleep'):
+            with patch.object(m._SEQ_ABORT, 'wait', return_value=False):
+                m._run_sequence(self.cfg, self._seq_button())
+            d = dict(m._SEQ_STATE)
+        self.assertEqual(calls, [('press', 'lalt+n'), ('down', 'space'), ('up', 'space'), ('press', 'k')])
+        self.assertIn('완료', d['msg'])
+    def test_sequence_requires_focus_at_start(self):
+        self.xml(_SEQ_XML)
+        with patch.object(m, '_game_focused', return_value=False):
+            r = self.client.post('/api/sequence', headers=self.headers, json={'button_id': 'launch-seq'})
+            self.assertEqual(r.status_code, 409)
+    def test_sequence_rejects_unbound(self):
+        r = self.client.post('/api/sequence', headers=self.headers, json={'button_id': 'launch-seq'})
+        self.assertEqual(r.status_code, 400)
+    def test_sequence_single_run_conflict(self):
+        m._seq_set(running=True, button_id='x', step=1, total=2, label='x', msg='')
+        try:
+            self.xml(_SEQ_XML)
+            with patch.object(m, '_game_focused', return_value=True):
+                r = self.client.post('/api/sequence', headers=self.headers, json={'button_id': 'launch-seq'})
+                self.assertEqual(r.status_code, 409)
+                r = self.client.post('/api/input', headers=self.headers, json={'type': 'press', 'key': 'k'})
+                self.assertEqual(r.status_code, 409)
+                r = self.client.post('/api/input', headers=self.headers, json={'type': 'up', 'key': 'k'})
+                self.assertNotEqual(r.status_code, 409)
+        finally:
+            m._seq_set(running=False, button_id='', step=0, total=0, label='', msg='')
+    def test_sequence_cancel_always_allowed(self):
+        self.xml(_SEQ_XML)
+        with patch.object(m, '_game_focused', return_value=True), \
+             patch.object(m, '_combo_press'), patch.object(m, '_combo_down'), patch.object(m, '_combo_up'), \
+             patch.object(m.time, 'sleep'):
+            self.assertEqual(self.client.post('/api/sequence', headers=self.headers,
+                                              json={'button_id': 'launch-seq'}).status_code, 200)
+            self.assertEqual(self.client.post('/api/sequence-cancel', headers=self.headers).status_code, 200)
+            d = self._wait_seq_done()
+        self.assertEqual(d['msg'], '취소했습니다')
+    def test_sequence_focus_loss_stops_before_next_key(self):
+        self.xml(_SEQ_XML)
+        b = self._seq_button()
+        with patch.object(m, '_game_focused', side_effect=[True, False]), \
+             patch.object(m, '_combo_press') as press, \
+             patch.object(m._SEQ_ABORT, 'wait', return_value=False):
+            m._run_sequence(self.cfg, b)
+        self.assertEqual(press.call_count, 1)
+        self.assertIn('중단', m._SEQ_STATE['msg'])
+    def test_sequence_cancel_during_lift_releases_space(self):
+        self.xml(_SEQ_XML)
+        b = self._seq_button()
+        b['steps'] = b['steps'][1:]
+        with patch.object(m, '_game_focused', return_value=True), \
+             patch.object(m, '_combo_down') as down, patch.object(m, '_combo_up') as up, \
+             patch.object(m, '_combo_press') as press, \
+             patch.object(m._SEQ_ABORT, 'wait', return_value=True):
+            m._run_sequence(self.cfg, b)
+        down.assert_called_once_with('space')
+        up.assert_called_once_with('space')
+        press.assert_not_called()
+        self.assertEqual(m._SEQ_STATE['msg'], '취소했습니다')
+    def test_sequence_holds_prevent_start_and_auth_required(self):
+        self.xml(_SEQ_XML)
+        self.assertEqual(self.client.post('/api/sequence', json={'button_id':'launch-seq'}).status_code,401)
+        self.assertEqual(self.client.get('/api/sequence').status_code,401)
+        self.assertEqual(self.client.post('/api/sequence-cancel').status_code,401)
+        with patch.object(m, '_game_focused', return_value=True):
+            m._ACTIVE_HOLDS['x'] = 1
+            self.assertEqual(self.client.post('/api/sequence', headers=self.headers,
+                json={'button_id':'launch-seq'}).status_code,409)
+    def test_sequence_conflicting_xml_and_custom_actions_locked(self):
+        self.xml(_SEQ_XML.replace('</ActionMaps>', '<actionmap name="other"><action name="x"><rebind input="kb1_k"/></action></actionmap></ActionMaps>'))
+        self.assertTrue(self._seq_button()['unbound'])
+        btn = {'id':'arbitrary','sequence':[{'action':'other.x'}], 'unbound':True}
+        m._resolve_sequence(btn, {'other.x':'k'}, {}, {})
+        self.assertTrue(btn['unbound'])
+
+    def test_sequence_delay_override_save_validate_reset(self):
+        self.xml(_SEQ_XML)
+        bad = self.client.post('/api/key-settings', headers=self.headers,
+                               json={'button_id': 'launch-seq', 'delays': [100, 500, 500]})
+        self.assertEqual(bad.status_code, 400)
+        bad = self.client.post('/api/key-settings', headers=self.headers,
+                               json={'button_id': 'launch-seq', 'delays': [500]})
+        self.assertEqual(bad.status_code, 400)
+        ok = self.client.post('/api/key-settings', headers=self.headers,
+                              json={'button_id': 'launch-seq', 'delays': [3000, 800, 400]})
+        self.assertEqual(ok.status_code, 200)
+        b = self._seq_button()
+        self.assertTrue(b['custom_delays'])
+        self.assertEqual([s['delay_ms'] for s in b['steps']], [3000, 800, 400])
+        rst = self.client.post('/api/key-settings', headers=self.headers, json={'button_id': 'launch-seq'})
+        self.assertEqual(rst.status_code, 200)
+        b = self._seq_button()
+        self.assertFalse(b['custom_delays'])
+        self.assertEqual(b['steps'][0]['delay_ms'], 2000)
 
 if __name__=='__main__':unittest.main()
