@@ -212,7 +212,13 @@
     0 0 60px rgba(70,200,230,.16), inset 0 1px 0 rgba(255,255,255,.06); }
   /* 레이디얼 휠 */
   #wheelPanel { max-width:700px; margin:0 auto; }
-  .wb.power-side .wseg { stroke:rgba(240,168,110,.65); fill:#231e1b; }
+  .wb.power-side .wseg { stroke:rgba(240,168,110,.55); fill:url(#powerGrad); }
+  .wheel-rim { fill:#0b1520; stroke:#344b5b; stroke-width:3; filter:drop-shadow(0 5px 3px #000); }
+  .bevel { fill:none; stroke:rgba(169,220,239,.23); stroke-width:.8; pointer-events:none; }
+  .side-depth { fill:#070c12; stroke:#060a10; stroke-width:2; pointer-events:none; }
+  .wb.power-side .bevel { stroke:rgba(255,211,163,.36); }
+  .wb.power-side .wfill { fill:rgba(240,168,110,.3); }
+  .wb.power-side.active .wseg { stroke:#ffc795; filter:drop-shadow(0 0 8px #ad774d); }
   .wb.power-side .wtxt, .wb.power-side .wkey { fill:#f0b98d; }
   .wheel-power-note { text-align:center; font-size:11px; color:#dcb298; margin:10px 0 0; }
   #wheelWrap { display:flex; justify-content:center; padding:10px 14px 4px; }
@@ -529,7 +535,7 @@ function buildWheel(grid, page, wheelIds) {
   const center = page.buttons.find(b => b.id === wheel.center);
   if (segs.length !== 6 || segs.some(s => !s) || !center) return;
   const cx = 160, cy = 160, r0 = 58, r1 = 148, cr = r0 - 12;
-  let clip = '', body = '';
+  let clip = '', body = `<circle class="wheel-rim" cx="160" cy="163" r="151"/><circle cx="160" cy="160" r="150" fill="none" stroke="#638294" stroke-width=".7"/>`;
   segs.forEach((b, i) => {
     const a0 = -120 + i * 60, am = a0 + 30;
     const d = wedgeD(cx, cy, r0, r1, a0, a0 + 60);
@@ -540,7 +546,7 @@ function buildWheel(grid, page, wheelIds) {
                          : (b.keys ? b.keys.toUpperCase() : '키 필요');
     clip += `<clipPath id="wc${i}"><path d="${d}"></path></clipPath>`;
     body += `<g class="wb${isSeq ? ' seq' : ''}${off}" data-bid="${esc(b.id)}">`
-      + `<path class="wseg" d="${d}"></path>`
+      + `<path class="wseg" d="${d}"></path><path class="bevel" d="${wedgeD(cx,cy,r0+2,r1-2,a0+.8,a0+59.2)}"/>`
       + `<g clip-path="url(#wc${i})"><path class="wfill" d="${d}"></path></g>`
       + `<text class="wtxt" x="${lx}" y="${ly - 4}" font-size="13">${esc(b.label)}</text>`
       + (isSeq ? `<text class="wsub" x="${lx}" y="${ly + 10}" font-size="9">SEQUENCE</text>` : '')
@@ -554,24 +560,27 @@ function buildWheel(grid, page, wheelIds) {
     + `<text class="wctext" x="${cx}" y="${cy + 7}" font-size="18">${esc(center.label)}</text></g>`;
   const sideButtons=(wheel.footer||[]).map(id=>page.buttons.find(b=>b.id===id)).filter(Boolean);
   sideButtons.forEach((b,i)=>{
-    const d=i===0?'M-24 10 H74 Q8 45 4 160 H-24 Z':'M344 10 H246 Q312 45 316 160 H344 Z';
-    const x=i===0?0:320, off=b.unbound||!b.keys;
+    const a0=i===0?-179:-60, a1=i===0?-120:-1;
+    const d=wedgeD(cx,cy,154,184,a0,a1);
+    const bevel=wedgeD(cx,cy,156,182,a0+1,a1-1);
+    const [x,y]=polar(cx,cy,169,i===0?-146:-34);
+    const rot=i===0?-56:56, off=b.unbound||!b.keys;
     clip+=`<clipPath id="wside${i}"><path d="${d}"/></clipPath>`;
-    body+=`<g class="wb power-side${off?' off':''}" data-bid="${esc(b.id)}" role="button" aria-label="${esc(b.label)}">`
+    body+=`<path class="side-depth" d="${d}" transform="translate(0 3)"/>`
+      +`<g class="wb power-side${off?' off':''}" data-bid="${esc(b.id)}" role="button" aria-label="${esc(b.label)}">`
       +`<title>${esc(b.label)} · ${esc(off?(b.disabled_reason||'키 지정 필요'):b.keys.toUpperCase())} · 전원 전환</title>`
-      +`<path class="wseg" d="${d}"/><g clip-path="url(#wside${i})"><path class="wfill" d="${d}"/></g>`
-      +`<text class="wtxt" x="${x}" y="48" font-size="13">${i===0?'함선':'엔진'}</text>`
-      +`<text class="wtxt" x="${x}" y="66" font-size="13">전원</text>`
-      +`<text class="wkey" x="${x}" y="88" font-size="9">${esc(off?'잠금':b.keys.length<=4?b.keys.toUpperCase():'XML')}</text></g>`;
+      +`<path class="wseg" d="${d}"/><path class="bevel" d="${bevel}"/><g clip-path="url(#wside${i})"><path class="wfill" d="${d}"/></g>`
+      +`<g transform="translate(${x} ${y}) rotate(${rot})"><text class="wtxt" y="1" font-size="11">${esc(b.label)}</text>`
+      +`<text class="wkey" y="12" font-size="7">${esc(off?'잠금':b.keys.length<=4?b.keys.toUpperCase():'XML')}</text></g></g>`;
   });
   const wrap = document.createElement('div');
   wrap.id = 'wheelWrap';
   wrap.innerHTML = '<svg class="wheel" viewBox="-28 0 376 320" role="group" aria-label="빠른 조작 휠"><defs>'
     + '<radialGradient id="segGrad" cx="50%" cy="42%" r="75%">'
-    + '<stop offset="0%" stop-color="#182f3d"/><stop offset="100%" stop-color="#0d1b26"/></radialGradient>'
+    + '<stop offset="0%" stop-color="#253e4c"/><stop offset="100%" stop-color="#0b1722"/></radialGradient>'
     + '<radialGradient id="ctrGrad" cx="50%" cy="40%" r="70%">'
     + '<stop offset="0%" stop-color="#1e3a4a"/><stop offset="100%" stop-color="#0c1820"/></radialGradient>'
-    + clip + '</defs>' + body + '</svg>';
+    + '<linearGradient id="powerGrad" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#34414b"/><stop offset=".18" stop-color="#26343f"/><stop offset=".65" stop-color="#14232e"/><stop offset="1" stop-color="#0b1721"/></linearGradient>' + clip + '</defs>' + body + '</svg>';
   const panel=document.createElement('section');panel.id='wheelPanel';panel.appendChild(wrap);
   if(sideButtons.length){const note=document.createElement('p');note.className='wheel-power-note';note.textContent='양쪽 전원 전환 · 눌러서 꺼질 수 있음 · 상태 표시 아님';panel.appendChild(note);}
   grid.appendChild(panel);

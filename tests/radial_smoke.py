@@ -51,7 +51,7 @@ with tempfile.TemporaryDirectory() as tmp, sync_playwright() as p:
  assert page.locator('#grid [data-id="gear"]').count()==0
  assert page.locator('#wheelPower').count()==0
  page.locator('.power-side').nth(0).dispatch_event('pointerdown');page.wait_for_timeout(300)
- page.locator('.power-side').nth(1).dispatch_event('pointerdown');page.wait_for_timeout(300)
+ page.locator('.power-side').nth(1).dispatch_event('pointerdown');page.wait_for_timeout(900)
  assert [x['key'] for x in input_calls]==['u','i'],input_calls
  page.locator('#wheelPanel').screenshot(path=str(O/'tablet-idle.png'))
  page.locator('[data-bid="launch-seq"]').dispatch_event('pointerdown')
