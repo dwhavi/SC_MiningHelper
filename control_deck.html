@@ -247,6 +247,14 @@
   .wb.seq .wkey { fill:#f0b98d; }
   .wctext { fill:#eafcff; font-weight:800; text-anchor:middle; letter-spacing:2px; pointer-events:none;
     text-shadow:0 0 16px rgba(70,200,230,.8); }
+  body.mining-running { padding-bottom:200px; }
+  #miningBar { display:none; position:sticky; bottom:0; z-index:7; padding:12px; background:#10232d; border:1px solid #326171; border-radius:12px; gap:10px; align-items:center; flex-wrap:wrap; }
+  #miningBar.show { display:flex; } #miningBar.running { position:fixed; left:10px; right:10px; bottom:10px; }
+  #miningBar select, #miningBar input { width:auto; max-width:150px; background:#0b1721; color:#eaf2f9; padding:6px; border:1px solid #467080; border-radius:5px; }
+  #miningStop { margin-left:auto; padding:9px 16px; background:#633d23; border:1px solid #b98556; border-radius:20px; }
+  .scan-lamp { fill:#57636a; stroke:#9ca9af; stroke-width:1; }
+  .mining-on .scan-lamp { fill:#74f5b1; stroke:#c5ffdf; filter:drop-shadow(0 0 6px #58e09a); }
+  .mining-on .wcenter { stroke:#74f5b1; }
   #seqBar { position:fixed; bottom:10px; left:0; right:0; z-index:8; box-shadow:0 0 30px #000; display:none; align-items:center; gap:10px; margin:8px 14px 0; padding:10px 14px;
     border:1px solid rgba(240,168,110,.4); background:linear-gradient(180deg,#241a12,#1b1512);
     border-radius:12px; font-size:13px; color:#f3cdb2; }
@@ -293,6 +301,7 @@
 <nav id="tabs" aria-label="덱 페이지"></nav>
 <section id="pageHeading"><div><h2 id="pageName"></h2><p id="pageDescription"></p></div><span id="pageCount"></span></section>
 <main id="grid"></main>
+<div id="miningBar"><span id="miningText">스캔 OFF</span><label>간격 <input id="miningInterval" type="number" min="1" max="30" step="1" value="5"> 초</label><button id="miningStop">스캔 중단</button></div>
 <div id="seqBar" role="status"><span id="seqText"></span><button id="seqCancel" type="button">중단</button></div>
 <div class="row">
   <button class="btn gray" id="btnTest" type="button">오버레이 테스트</button>
@@ -435,9 +444,12 @@ function render() {
   const grid = document.getElementById('grid');
   grid.replaceChildren();
   grid.className = page.id === 'power' ? 'power' : '';
-  const wheel = page.wheel || null;
+  const miningWheel=page.id==='mining';
+  const miningCenter={id:'mining-auto',label:'자동 스캔',keys:'LOCAL',auto_scan:true};
+  const wheel = miningWheel ? {center:'mining-auto',segments:['mining-mode','scan-mode','laser-type','laser','mining-light','flight-mode']} : (page.wheel || null);
   const wheelIds = wheel ? new Set([wheel.center, ...(wheel.segments || []), ...(wheel.footer || [])]) : new Set();
-  if (wheel) buildWheel(grid, page, wheelIds);
+  if (wheel) buildWheel(grid, miningWheel?{...page,wheel,buttons:[...page.buttons,miningCenter]}:page, wheelIds);
+  updateMiningUI();
   const groups = new Map();
   page.buttons.forEach(b => {
     if (wheelIds.has(b.id)) return;
@@ -557,7 +569,7 @@ function buildWheel(grid, page, wheelIds) {
   body += `<g class="wb${cOff}" data-bid="${esc(center.id)}">`
     + `<circle class="wcenter" cx="${cx}" cy="${cy}" r="${cr}"></circle>`
     + `<g clip-path="url(#wcc)"><circle class="wfill" cx="${cx}" cy="${cy}" r="${cr}"></circle></g>`
-    + `<text class="wctext" x="${cx}" y="${cy + 7}" font-size="18">${esc(center.label)}</text></g>`;
+    + (center.auto_scan?`<circle class="scan-lamp" cx="${cx}" cy="${cy-23}" r="5"/><text class="wctext" x="${cx}" y="${cy+1}" font-size="14" id="miningLabel">스캔</text><text id="miningLampText" class="wkey" x="${cx}" y="${cy+21}" font-size="12">OFF</text>`:`<text class="wctext" x="${cx}" y="${cy+7}" font-size="18">${esc(center.label)}</text>`)+'</g>';
   const sideButtons=(wheel.footer||[]).map(id=>page.buttons.find(b=>b.id===id)).filter(Boolean);
   sideButtons.forEach((b,i)=>{
     const a0=i===0?-179:-60, a1=i===0?-120:-1;
@@ -582,6 +594,7 @@ function buildWheel(grid, page, wheelIds) {
     + '<stop offset="0%" stop-color="#1e3a4a"/><stop offset="100%" stop-color="#0c1820"/></radialGradient>'
     + '<linearGradient id="powerGrad" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#34414b"/><stop offset=".18" stop-color="#26343f"/><stop offset=".65" stop-color="#14232e"/><stop offset="1" stop-color="#0b1721"/></linearGradient>' + clip + '</defs>' + body + '</svg>';
   const panel=document.createElement('section');panel.id='wheelPanel';panel.appendChild(wrap);
+  if(center.auto_scan){const note=document.createElement('p');note.className='wheel-power-note';note.textContent='램프 ON = 화면 읽기 활성 · 게임 스캔 성공/모드 상태 아님';panel.appendChild(note);}
   if(sideButtons.length){const note=document.createElement('p');note.className='wheel-power-note';note.textContent='양쪽 전원 전환 · 눌러서 꺼질 수 있음 · 상태 표시 아님';panel.appendChild(note);}
   grid.appendChild(panel);
   const byId = {};
@@ -590,6 +603,7 @@ function buildWheel(grid, page, wheelIds) {
 }
 function bindWheel(el, b) {
   if (!b) return;
+  if(b.auto_scan){el.addEventListener('pointerdown',e=>{e.preventDefault();toggleMining();});return;}
   if (b.unbound || !b.keys) {
     el.addEventListener('click', () =>
       log((b.label || '') + ': ' + (b.disabled_reason || '키 지정 필요'), false));
@@ -649,7 +663,7 @@ async function checkSequence() {
     if (!r.ok) return;
     const d = await r.json();
     seqActive = !!d.running;
-    document.getElementById('settingsOpen').disabled=seqActive;
+    document.getElementById('settingsOpen').disabled=seqActive||miningRunning;
     document.querySelectorAll('.wb.seq').forEach(el=>el.classList.toggle('active',seqActive && el.dataset.bid===d.button_id));
     if (seqActive) {
       if(keyDialog.open)keyDialog.close();
@@ -677,6 +691,37 @@ document.getElementById('seqCancel').addEventListener('click', async () => {
   await post('/api/sequence-cancel', {}, true);
   await checkSequence();
 });
+
+let miningRunning=false, miningBusy=false;
+function updateMiningUI(d) {
+  if(d)miningRunning=!!d.running;
+  const bar=document.getElementById('miningBar');
+  bar.classList.toggle('show',miningRunning||S.layout?.pages?.[S.page]?.id==='mining');
+  bar.classList.toggle('running',miningRunning);
+  document.body.classList.toggle('mining-running',miningRunning);
+  document.getElementById('settingsOpen').disabled=miningRunning||seqActive;
+  document.getElementById('miningInterval').disabled=miningRunning;
+  document.getElementById('miningStop').disabled=!miningRunning;
+  if(d)document.getElementById('miningText').textContent=miningRunning?`스캔 ON · ${d.pulses||0}회 · ${d.tracking||''}`:('스캔 OFF'+(d.msg?' · '+d.msg:''));
+  const el=document.querySelector('[data-bid="mining-auto"]');
+  if(el)el.classList.toggle('mining-on',miningRunning);
+  const lamp=document.getElementById('miningLampText');if(lamp)lamp.textContent=miningRunning?'ON':'OFF';
+}
+async function toggleMining(stop=false){
+  if(miningBusy)return;miningBusy=true;
+  try{
+    const enabled=!stop&&!miningRunning;
+    const r=await fetch('/api/mining-scan',{method:'POST',headers:{'Content-Type':'application/json','X-Pairing-Code':S.code},body:JSON.stringify({enabled,interval_ms:Math.round(Number(document.getElementById('miningInterval').value)*1000)})});
+    const d=await r.json();if(!r.ok){log(d.msg||'자동 스캔 요청 실패',false);return;}
+    await checkMining();
+  }catch(e){log('PC 연결 실패 · 중단 여부를 PC에서 확인하세요',false);}
+  finally{miningBusy=false;}
+}
+async function checkMining(){
+  if(!S.code)return;
+  try{const r=await fetch('/api/mining-scan',{headers:{'X-Pairing-Code':S.code}});if(r.ok){const d=await r.json();if(d.running&&d.interval_ms)document.getElementById('miningInterval').value=d.interval_ms/1000;updateMiningUI(d);}}catch(e){}
+}
+document.getElementById('miningStop').onclick=()=>toggleMining(true);
 
 const K = {layout:null, selected:null, busy:false};
 const keyDialog = document.getElementById('keyDialog');
@@ -771,7 +816,7 @@ function drawKeyEditor() {
   document.getElementById('keyReset').disabled=locked || (isSeq ? !(b?.custom_delays||b?.custom_step_keys) : !b?.override_keys);
 }
 async function openKeySettings() {
-  if(seqActive)return;
+  if(seqActive||miningRunning)return;
   releaseAll();
   try {
     const r=await fetch('/api/key-settings',{headers:{'X-Pairing-Code':S.code}});
@@ -857,6 +902,7 @@ document.addEventListener('contextmenu', e => e.preventDefault());
   render();
   const a = await post('/api/auth', null, true);
   if (a !== 200) showPair('PC 제어 창의 페어링 코드를 입력하세요');
+  setInterval(checkMining,1000);checkMining();
   seqPoll=setInterval(checkSequence,500);
   checkSequence();
 })();

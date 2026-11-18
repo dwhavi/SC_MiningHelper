@@ -42,11 +42,11 @@ with tempfile.TemporaryDirectory() as tmp, sync_playwright() as p:
  assert abs(page.locator('#powerTop').bounding_box()['y'])<1
  assert page.locator('[data-id="weapons-increase"]').bounding_box()['y']>=0
  page.evaluate('window.scrollTo(0,0)')
- assert page.locator('[data-id="laser"]').is_disabled()
- page.locator('[data-id="mining-mode"]').click();page.wait_for_timeout(80)
+ assert 'off' in page.locator('[data-bid="laser"]').get_attribute('class')
+ page.locator('[data-bid="mining-mode"]').dispatch_event('pointerdown');page.wait_for_timeout(80)
  assert [x[1]['type'] for x in requests]==['press'],requests
  requests.clear()
- h=page.locator('[data-id="ping"]');box=h.bounding_box()
+ h=page.locator('[data-id="ping"]');h.scroll_into_view_if_needed();box=h.bounding_box()
  page.mouse.move(box['x']+10,box['y']+10);page.mouse.down();page.wait_for_timeout(50)
  page.evaluate('releaseAll()');page.mouse.up();page.wait_for_timeout(80)
  assert [x[1]['type'] for x in requests]==['down','up'],requests

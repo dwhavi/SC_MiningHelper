@@ -318,12 +318,91 @@ def _group_rows(result):
     return lines
 
 
+def _ocr_tokens(result):
+    return [{"text": text, "confidence": float(conf),
+             "left": min(p[0] for p in box) / 2, "top": min(p[1] for p in box) / 2,
+             "width": (max(p[0] for p in box)-min(p[0] for p in box))/2,
+             "height": (max(p[1] for p in box)-min(p[1] for p in box))/2}
+            for box, text, conf in (result or [])]
+
+
+class SignatureTracker:
+    """Reacquire across the central vertical corridor every frame; never lock to old y."""
+    def __init__(self):
+        self.pending = None
+        self.last_seen = 0.0
+        self.region = None
+
+    def detect(self, tokens, search, table, now):
+        candidates = []
+        for t in tokens:
+            if t["confidence"] < .65:
+                continue
+            text = t["text"].strip().replace(",", "").replace(" ", "")
+            if not re.fullmatch(r"\d{4,6}", text):
+                continue  # Excludes compass headings, speed units and mixed HUD text.
+            n = int(text)
+            if not match_signature(n, table):
+                continue
+            if not .15*search["width"] <= t["left"]+t["width"]/2 <= .85*search["width"]:
+                continue
+            candidates.append((n,t))
+        unique = {n for n,t in candidates}
+        if len(unique) != 1 or len(candidates) != 1:
+            self.pending = None
+            self.region = None
+            return None
+        n,t = candidates[0]
+        # Reserve space for the nearby HUD marker; this does not validate its shape.
+        self.region = {"left":max(0,int(search["left"]+t["left"]-60)),
+                       "top":max(0,int(search["top"]+t["top"]-35)),
+                       "width":min(search["width"],int(t["width"]+120)), "height":min(search["height"],int(t["height"]+70))}
+        confirmed = n if self.pending == n else None
+        self.pending = n
+        if confirmed:
+            self.last_seen = now
+        return confirmed
+
+
+def read_mining_signature(engine, cap, region, tracker, table, active):
+    """Read a fresh frame; retry once immediately on no confirmation or OCR error.
+
+    active is checked before each frame and after OCR to honor stop/generation changes.
+    Never issues input. Persistent exceptions escape after the one retry.
+    """
+    for attempt in range(2):
+        if not active():
+            return None
+        try:
+            tokens=engine.read_tokens(cap.grab(region))
+        except Exception:
+            if attempt==0:
+                continue
+            raise
+        if not active():
+            return None
+        rs=tracker.detect(tokens,region,table,time.monotonic())
+        if rs is not None:
+            return rs
+    return None
+
+
+def mining_search_region(mon):
+    w,h = mon["width"],mon["height"]
+    return {"left":int(w*.28), "top":int(h*.02), "width":int(w*.44), "height":int(h*.86)}
+
+
 class RapidOcrBackend:
     name = "rapidocr"
 
     def __init__(self):
         from rapidocr_onnxruntime import RapidOCR
         self._engine = RapidOCR()
+
+    def read_tokens(self, img):
+        import numpy as np
+        result, _ = self._engine(np.array(_preprocess(img)))
+        return _ocr_tokens(result)
 
     def read_lines(self, img):
         import numpy as np
@@ -370,7 +449,10 @@ class WindowsOcrBackend:
         result = asyncio.run(run())
         return [(line.text, 1.0) for line in result.lines]
 
-    def read_lines_pos(self, img):
+    def read_tokens(self, img):
+        return self.read_lines_pos(img, tokens=True)
+
+    def read_lines_pos(self, img, tokens=False):
         import numpy as np
         from winsdk.windows.graphics.imaging import (
             BitmapDecoder, BitmapPixelFormat, SoftwareBitmap)
@@ -392,6 +474,12 @@ class WindowsOcrBackend:
 
         result = asyncio.run(run())
         out = []
+        if tokens:
+            for line in result.lines:
+                for word in line.words:
+                    r=word.bounding_rect
+                    out.append(dict(text=word.text,confidence=1.0,left=r.x/2,top=r.y/2,width=r.width/2,height=r.height/2))
+            return out
         for line in result.lines:
             try:
                 y = min(w.bounding_rect.y for w in line.words)
@@ -1066,6 +1154,75 @@ def _run_sequence(cfg, btn):
         _seq_set(running=False, step=0)
 
 
+_MINING_LOCK = threading.Lock()
+_MINING_ABORT = threading.Event()
+_MINING_STATE = {"running": False, "interval_ms":5000, "pulses":0, "msg":"", "region":None, "tracking":"대기", "heartbeat":0.0}
+_MINING_GENERATION = 0
+
+
+def _mining_status():
+    with _MINING_LOCK:
+        return dict(_MINING_STATE)
+
+
+def _mining_update(**kw):
+    with _MINING_LOCK:
+        _MINING_STATE.update(kw)
+
+
+def _start_mining_thread(cfg):
+    threading.Thread(target=_mining_runner,args=(cfg,),daemon=True).start()
+
+
+def _mining_runner(cfg):
+    try:
+        while not _MINING_ABORT.is_set():
+            with _DECK_INPUT_LOCK:
+                if not cfg.get("scan_enabled",True):
+                    _mining_update(msg="PC 스캔 OFF · 중단")
+                    break
+                if _MINING_ABORT.is_set():
+                    break
+                if time.monotonic()-_mining_status()["heartbeat"]>10:
+                    _mining_update(msg="패드 연결 확인 끊김 · 스캔 중단")
+                    break
+                if not _game_focused():
+                    _mining_update(msg="게임 포커스 이탈로 스캔 중단")
+                    break
+                cycle_started=time.monotonic()
+                should_pulse=True
+                layout=_resolved_deck_layout(cfg)
+                btn=next((b for b in _deck_buttons(layout) if b.get("id")=="ping"),{})
+                if btn.get("unbound") or not btn.get("keys"):
+                    _mining_update(msg="스캔 핑 키 지정 필요 · 중단")
+                    break
+                with _HOLD_LOCK:
+                    if _ACTIVE_HOLDS:
+                        should_pulse=False
+                if should_pulse:
+                    _combo_down(btn["keys"])
+                    try:
+                        if _MINING_ABORT.wait(.12):
+                            break
+                    finally:
+                        _combo_up(btn["keys"])
+                    _mining_update(pulses=_mining_status()["pulses"]+1)
+            deadline=cycle_started+_mining_status()["interval_ms"]/1000
+            while time.monotonic()<deadline and not _MINING_ABORT.wait(min(.05,max(0,deadline-time.monotonic()))):
+                if not cfg.get("scan_enabled",True) or time.monotonic()-_mining_status()["heartbeat"]>10:
+                    _mining_update(msg="스캔 OFF 또는 패드 연결 끊김 · 중단")
+                    return
+                if not _game_focused():
+                    _mining_update(msg="게임 포커스 이탈로 스캔 중단")
+                    return
+    except Exception as e:
+        _mining_update(msg="스캔 입력 실패: "+str(e))
+    finally:
+        cfg["scan_enabled"]=False
+        _mining_update(running=False,region=None,tracking="중단")
+        _MINING_ABORT.clear()
+
+
 _POWER_ALIASES = {
     "wheel-power": ("power-all", "spaceship_power.v_power_toggle"),
     "wheel-engine": ("power-engine", "spaceship_power.v_power_toggle_thrusters"),
@@ -1305,6 +1462,10 @@ def create_app(state, cfg):
         step_keys: list[str] | None = None  # empty item restores that step to XML
         delays: list[StrictInt] | None = None   # 시퀀스 버튼의 단계별 간격(ms)
 
+    class MiningRequest(BaseModel):
+        enabled: bool
+        interval_ms: StrictInt = 5000
+
     class SeqRequest(BaseModel):
         button_id: str
 
@@ -1472,6 +1633,54 @@ def create_app(state, cfg):
             ok, msg = _send_input(action, body.key, body.ms)
             return JSONResponse({"ok": ok, "msg": msg}, status_code=200 if ok else 400)
 
+    @app.get("/api/mining-scan")
+    def mining_status(request: Request):
+        deny=_check_pair(request)
+        if deny is not None:
+            return deny
+        _mining_update(heartbeat=time.monotonic())
+        status=_mining_status();status.pop("heartbeat",None)
+        return status
+
+    @app.post("/api/mining-scan")
+    def mining_scan(body: MiningRequest, request: Request):
+        global _MINING_GENERATION
+        deny=_check_pair(request)
+        if deny is not None:
+            return deny
+        if not body.enabled:
+            _MINING_ABORT.set()
+            cfg["scan_enabled"]=False
+            state.clear()
+            _mining_update(msg="중단 요청")
+            return {"ok":True}
+        if not 1000 <= body.interval_ms <= 30000:
+            return JSONResponse({"msg":"간격은 1000~30000ms"},status_code=400)
+        with _DECK_INPUT_LOCK:
+            status=_mining_status()
+            if status["running"] or _seq_running():
+                return JSONResponse({"msg":"다른 스캔/자동 입력 실행 중"},status_code=409)
+            with _HOLD_LOCK:
+                if _ACTIVE_HOLDS:
+                    return JSONResponse({"msg":"누르는 키를 먼저 놓으세요"},status_code=409)
+            if not _game_focused():
+                return JSONResponse({"msg":"게임 창이 앞에 있어야 합니다"},status_code=409)
+            btn=next((b for b in _deck_buttons(_resolved_deck_layout(cfg)) if b.get("id")=="ping"),{})
+            if btn.get("unbound") or not btn.get("keys"):
+                return JSONResponse({"msg":"스캔 핑 키 지정 필요"},status_code=400)
+            _MINING_ABORT.clear()
+            _MINING_GENERATION+=1
+            cfg["capture_enabled"]=True
+            cfg["scan_enabled"]=True
+            _mining_update(running=True,interval_ms=body.interval_ms,pulses=0,msg="",region=None,tracking="중앙 HUD 탐색 중",heartbeat=time.monotonic())
+            state.clear()
+            try:
+                _start_mining_thread(cfg)
+            except RuntimeError:
+                _mining_update(running=False,msg="스캔 시작 실패")
+                return JSONResponse({"msg":"시작 실패"},status_code=500)
+            return {"ok":True}
+
     @app.post("/api/sequence")
     def run_sequence(body: SeqRequest, request: Request):
         """시간텀 시퀀스 시작. 단일 실행 · 매 단계 포커스 재확인 · 취소 가능."""
@@ -1479,6 +1688,8 @@ def create_app(state, cfg):
         if deny is not None:
             return deny
         with _DECK_INPUT_LOCK:
+            if _mining_status()["running"]:
+                return JSONResponse({"msg":"자동 스캔 중 · 먼저 중단하세요"},status_code=409)
             layout = _resolved_deck_layout(cfg)
             matches = [b for b in _deck_buttons(layout)
                        if b.get("id") == body.button_id and b.get("sequence")]
@@ -2337,6 +2548,9 @@ class ControlApp:
             print(f"[deck] 설정 파일 열기 실패: {e}")
 
     def quit(self):
+        _MINING_ABORT.set()
+        with _DECK_INPUT_LOCK:
+            pass  # Wait for the current bounded pulse's finally-release.
         with _HOLD_LOCK:
             held = list(_ACTIVE_HOLDS)
             _ACTIVE_HOLDS.clear()
@@ -2399,8 +2613,13 @@ class ControlApp:
         rs = st.get("rs")
         phase = {"idle": "대기", "scan": "스캔", "close_scan": "근접 스캔",
                  "test": "테스트"}.get(st.get("phase"), st.get("phase", "-"))
+        mining=_mining_status()
+        if scan_on:self.scan_sw.select()
+        else:self.scan_sw.deselect()
         region_ok = bool(self.cfg.get("rs_region"))
-        if rs:
+        if mining["running"]:
+            txt = ("RS " + str(rs) + " · " if rs else "") + mining["tracking"]
+        elif rs:
             txt = f"RS {rs} · {phase} · {st.get('updated_at', '')}"
         elif region_ok:
             txt = f"대기 중 ({phase})"
@@ -2432,15 +2651,24 @@ def capture_loop(cfg, state):
     sig_table = load_data("signatures.json")
     last_rs = None
     last_panel_sig = None
+    tracker=SignatureTracker()
+    generation=-1
+    auto_was_running=False
     pending_rs = None  # 넓은 검색: 2회 연속 같은 후보일 때만 채택
     while True:
         try:
+            auto_running=_mining_status()["running"]
+            if auto_was_running and not auto_running:
+                state.clear()
+            auto_was_running=auto_running
+            if auto_running and generation != _MINING_GENERATION:
+                tracker=SignatureTracker();generation=_MINING_GENERATION;last_rs=None
             rs_region = cfg.get("rs_region")
             panel_region = cfg.get("panel_region")
             rs_wide = cfg.get("rs_search", "wide") != "fixed"
             if not cfg.get("capture_enabled", True) \
                     or not cfg.get("scan_enabled", True) \
-                    or not (rs_region or panel_region or rs_wide):
+                    or not (auto_running or rs_region or panel_region or rs_wide):
                 time.sleep(0.4)
                 continue
             if engine is None:
@@ -2450,7 +2678,26 @@ def capture_loop(cfg, state):
                 cap = Capturer(cfg.get("monitor", 1))
             interval = max(cfg.get("poll_interval_ms", 500), 200) / 1000.0
             rs = None
-            if rs_wide:
+            if auto_running:
+                if not _game_focused():
+                    _MINING_ABORT.set()
+                    state.clear()
+                    time.sleep(.2)
+                    continue
+                region=mining_search_region(cap.mon_size())
+                def active():
+                    return (_mining_status()["running"] and not _MINING_ABORT.is_set()
+                            and generation==_MINING_GENERATION and _game_focused()
+                            and cfg.get("scan_enabled",True))
+                rs=read_mining_signature(engine,cap,region,tracker,sig_table,active)
+                if not active():
+                    state.clear();last_rs=None
+                    continue
+                _mining_update(region=tracker.region,tracking="시그니처 추적 중" if rs else "중앙 HUD 재탐색 중")
+                if time.monotonic()-tracker.last_seen>3:
+                    state.clear();last_rs=None
+                interval=max(interval,.8)
+            elif rs_wide:
                 # 함선이 바라보는 방향에 따라 RS 숫자 위치가 바뀌므로 넓은
                 # 영역을 읽고 시그니처 표와 맞는 숫자만 채택한다.
                 interval = max(interval, 0.8)
@@ -2472,7 +2719,7 @@ def capture_loop(cfg, state):
                 last_rs = rs
                 print(f"[capture] RS {rs}")
                 state.update_scan(rs=rs, phase="scan")
-            if panel_region:
+            if panel_region and not auto_running:
                 lines = engine.read_lines(cap.grab(panel_region))
                 panel = parse_panel([t for t, c in lines if c >= 0.5], known)
                 sig_key = repr(panel["minerals"]) + repr(panel["resistance_pct"])
@@ -2482,6 +2729,10 @@ def capture_loop(cfg, state):
                     print(f"[capture] 패널: {panel}")
                     state.update_scan(panel=panel)
         except Exception as e:
+            if auto_running:
+                state.clear();last_rs=None
+                _mining_update(tracking="OCR 오류 · 스캔 중단")
+                _MINING_ABORT.set()
             LAST_ERROR = f"{type(e).__name__}: {e}"
             print(f"[capture] 오류 (계속 시도): {e}")
             interval = 1.0
