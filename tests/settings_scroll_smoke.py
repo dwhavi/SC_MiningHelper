@@ -22,7 +22,7 @@ with sync_playwright() as p:
    r.fulfill(content_type='application/json',body=json.dumps(data))
   page.route('http://deck.test/**',route);page.goto('http://deck.test/')
   page.locator('#settingsOpen').click();page.locator('#keySection').select_option('3')
-  assert page.locator('#keyList button').count()==15
+  assert page.locator('#keyList button').count()==9
   lst=page.locator('#keyList');lst.scroll_into_view_if_needed()
   geom=lst.evaluate('e=>({client:e.clientHeight,scroll:e.scrollHeight,touch:getComputedStyle(e.querySelector("button")).touchAction})')
   print(width,height,geom)

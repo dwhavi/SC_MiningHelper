@@ -229,54 +229,6 @@
           ]
         },
         {
-          "id": "scm",
-          "label": "SCM 선택",
-          "action": "spaceship_movement.v_master_mode_set_scm",
-          "group": "마스터 모드",
-          "mode": "tap",
-          "keys": ""
-        },
-        {
-          "id": "nav",
-          "label": "NAV 선택",
-          "action": "spaceship_movement.v_master_mode_set_nav",
-          "group": "마스터 모드",
-          "mode": "tap",
-          "keys": ""
-        },
-        {
-          "id": "dock",
-          "label": "도킹 요청",
-          "action": "spaceship_docking.v_toggle_docking_request",
-          "group": "도킹 · 시점",
-          "mode": "tap",
-          "keys": ""
-        },
-        {
-          "id": "dock-camera",
-          "label": "도킹 카메라",
-          "action": "spaceship_docking.v_dock_toggle_view",
-          "group": "도킹 · 시점",
-          "mode": "tap",
-          "keys": ""
-        },
-        {
-          "id": "thirdperson",
-          "label": "3인칭",
-          "action": "player.thirdperson",
-          "group": "도킹 · 시점",
-          "mode": "tap",
-          "keys": ""
-        },
-        {
-          "id": "freelook",
-          "label": "자유 시점",
-          "action": "spaceship_view.v_view_freelook_mode",
-          "group": "도킹 · 시점",
-          "mode": "hold",
-          "keys": ""
-        },
-        {
           "id": "wheel-power",
           "label": "함선 전원",
           "action": "spaceship_power.v_power_toggle",

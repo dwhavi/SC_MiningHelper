@@ -1264,6 +1264,12 @@ def _resolved_deck_layout(cfg, overrides=None):
     overrides = _read_key_overrides() if overrides is None else overrides
     bindings, seen, path = _load_action_bindings(cfg)
     layout["actionmaps_active"] = bool(path)
+    # Retire the standalone groups in old customized v4 layouts too. Preserve all
+    # stored layout/override files; LAUNCH/LANDING docking steps are unaffected.
+    for page in layout.get("pages", []):
+        if page.get("id") == "ship":
+            page["buttons"] = [b for b in page.get("buttons", [])
+                               if b.get("id") not in {"scm", "nav", "dock", "dock-camera", "thirdperson", "freelook"}]
     # Duplicate XML keys can trigger several actions in the same game context.
     # Do not infer contexts or treat a new key as safe just because it parses.
     owners = _AM_CACHE.get("owners", {}) if path else {}
