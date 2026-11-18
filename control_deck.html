@@ -808,7 +808,7 @@ function settingGroups() {
 function sourceLabel(b) {
   if (b.sequence) {
     if (b.unbound) return b.disabled_reason || '시퀀스 키 지정 필요';
-    return (b.steps || []).length + '단계 시퀀스 · ' + (b.custom_step_keys?'사용자/XML':'XML') + (b.custom_delays ? ' · 간격 조정됨' : '');
+    return (b.steps || []).length + '단계 시퀀스 · ' + (b.custom_step_keys?'사용자/XML':'XML') + (b.custom_delays ? ' · 간격 조정됨' : '') + (b.custom_hold ? ' · 유지 시간 조정됨' : '');
   }
   if (b.unbound || !b.keys) return b.disabled_reason || '키 지정 필요';
   return b.keys.toUpperCase() + (b.keys_source === 'override' ? ' · 사용자 지정' : b.keys_source === 'fixed' ? ' · 고정 키' : ' · XML');
@@ -874,7 +874,14 @@ function drawKeyEditor() {
       reset.onclick=()=>{sel.value='';mods.querySelectorAll('input').forEach(c=>c.checked=false);};
       const delayLabel=document.createElement('label');delayLabel.textContent='단계 뒤 대기 (ms)';
       const delay=document.createElement('input');delay.type='number';delay.min=200;delay.max=10000;delay.step=100;delay.value=st.delay_ms ?? 1000;delay.dataset.step=i;delay.setAttribute('aria-label',`${i+1}단계 뒤 대기(ms)`);
-      info.append(name,source,sel,mods,reset,delayLabel,delay);row.appendChild(info);seqBox.appendChild(row);
+      info.append(name,source,sel,mods,reset);
+      if(b.id==='launch-seq' && st.action==='spaceship_movement.v_strafe_up'){
+        const holdLabel=document.createElement('label');holdLabel.textContent='상승 키 누르는 시간 (ms)';
+        const hold=document.createElement('input');hold.type='number';hold.id='liftHoldMs';hold.min=50;hold.max=5000;hold.step=50;hold.value=st.hold_ms;hold.setAttribute('aria-label','상승 키 누르는 시간 (ms)');
+        const hint=document.createElement('p');hint.className='seq-note';hint.textContent='50~5000ms · 1000ms = 1초 · 기본 1500ms (1.5초). 아래 대기 시간과 별개입니다. 천장 여유를 확인하고 짧게 시험하세요. 자동 높이 감지 없음.';
+        info.append(holdLabel,hold,hint);
+      }
+      info.append(delayLabel,delay);row.appendChild(info);seqBox.appendChild(row);
     });
     const note=document.createElement('div');note.className='seq-note';note.textContent='XML 사용은 해당 단계의 사용자 키만 지웁니다. 편집 후 아래 저장을 누르세요. 대기 200~10000ms. 게임 완료 여부는 확인하지 못합니다.';seqBox.appendChild(note);
   } else {
@@ -888,7 +895,7 @@ function drawKeyEditor() {
   document.getElementById('keyReset').textContent=isSeq?'전체 기본값':'XML로 되돌리기';
   document.getElementById('keyMain').disabled=locked;
   document.getElementById('keySave').disabled=locked;
-  document.getElementById('keyReset').disabled=locked || (isSeq ? !(b?.custom_delays||b?.custom_step_keys) : !b?.override_keys);
+  document.getElementById('keyReset').disabled=locked || (isSeq ? !(b?.custom_delays||b?.custom_step_keys||b?.custom_hold) : !b?.override_keys);
 }
 async function openKeySettings() {
   if(seqActive||miningRunning)return;
@@ -917,6 +924,8 @@ async function saveSetting(reset) {
         return [...row.querySelectorAll('.seq-mods input:checked')].map(e=>e.value).concat(main).join('+');
       });
       payload={button_id:b.id,delays,step_keys};
+      const hold=document.getElementById('liftHoldMs');
+      if(hold){const value=Number(hold.value);if(!Number.isInteger(value)||value<50||value>5000){document.getElementById('keyMessage').textContent='상승 키 유지 시간은 50~5000ms 사이의 정수로 입력하세요';return;}payload.lift_hold_ms=value;}
     }
   } else {
     const key=reset ? '' : previewSettingKey();
@@ -929,9 +938,9 @@ async function saveSetting(reset) {
     const j=await r.json();
     if(!r.ok){if(r.status===401){keyDialog.close();showPair('다시 페어링하세요');}throw new Error(j.msg || '저장 실패');}
     releaseAll();K.layout=j.layout;S.layout=j.layout;render();drawKeyList();
-    document.getElementById('keyMessage').textContent=reset ? (isSeq ? '전체 단계 키를 XML로, 간격을 기본값으로 되돌렸습니다.' : '사용자 지정을 지웠습니다. XML에 없으면 잠금 상태입니다.') : (isSeq ? 'PC에 시퀀스 키와 간격을 저장했습니다. 게임의 실제 키와 맞춰 주세요.' : 'PC에 저장했습니다. 게임의 실제 키와 맞는지 확인하세요.');
+    document.getElementById('keyMessage').textContent=reset ? (isSeq ? '전체 단계 키를 XML로, 간격을 기본값으로 되돌렸습니다.' : '사용자 지정을 지웠습니다. XML에 없으면 잠금 상태입니다.') : (isSeq ? 'PC에 시퀀스 키·유지 시간·대기 시간을 저장했습니다. 게임에서 확인하세요.' : 'PC에 저장했습니다. 게임의 실제 키와 맞는지 확인하세요.');
   } catch(e){document.getElementById('keyMessage').textContent=e.message || 'PC 연결 실패';}
-  finally {K.busy=false;document.getElementById('keySection').disabled=false;document.getElementById('keyUnassigned').disabled=false;const b=selectedSetting();const s2=!!(b&&b.sequence);const locked=s2 ? (!b||!(b.steps||[]).length) : (!b || !b.action || !!b.blocked_reason || !!b.xml_only);document.getElementById('keySave').disabled=locked;document.getElementById('keyReset').disabled=locked || (s2 ? !(b?.custom_delays||b?.custom_step_keys) : !b?.override_keys);}
+  finally {K.busy=false;document.getElementById('keySection').disabled=false;document.getElementById('keyUnassigned').disabled=false;const b=selectedSetting();const s2=!!(b&&b.sequence);const locked=s2 ? (!b||!(b.steps||[]).length) : (!b || !b.action || !!b.blocked_reason || !!b.xml_only);document.getElementById('keySave').disabled=locked;document.getElementById('keyReset').disabled=locked || (s2 ? !(b?.custom_delays||b?.custom_step_keys||b?.custom_hold) : !b?.override_keys);}
 }
 const mainKeys=['',...Array.from({length:12},(_,i)=>'f'+(i+1)),...'0123456789',...'bcfghijklmnoprtuvxyz',
  'tab','enter','esc','backspace','delete','insert','home','end','pageup','pagedown','minus','equal','lbracket','rbracket','semicolon','apostrophe','comma','period','slash','backslash','backquote',

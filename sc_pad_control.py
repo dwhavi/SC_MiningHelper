@@ -1007,6 +1007,7 @@ _SEQ_MIN_DELAY_MS = 200
 _SEQ_MAX_DELAY_MS = 10000
 _SEQ_MAX_STEPS = 8
 _SEQ_MAX_HOLD_MS = 5000
+_SEQ_MIN_LIFT_HOLD_MS = 50
 
 
 def _resolve_sequence(btn, bindings, owners, overrides):
@@ -1029,6 +1030,10 @@ def _resolve_sequence(btn, bindings, owners, overrides):
     step_keys = custom.get("step_keys", {}) if isinstance(custom, dict) and custom.get("action") == "sequence" else {}
     if not isinstance(step_keys, dict):
         step_keys = {}
+    saved_hold = custom.get("lift_hold_ms") if isinstance(custom, dict) and custom.get("action")=="sequence" else None
+    valid_hold = (btn.get("id")=="launch-seq" and type(saved_hold) is int
+                  and _SEQ_MIN_LIFT_HOLD_MS <= saved_hold <= _SEQ_MAX_HOLD_MS)
+    btn["custom_hold"] = valid_hold
     btn["custom_step_keys"] = bool(step_keys)
     btn["custom_delays"] = bool(saved)
     for i, st in enumerate(btn.get("sequence") or []):
@@ -1046,6 +1051,8 @@ def _resolve_sequence(btn, bindings, owners, overrides):
             saved = None
         if st.get("action") != "spaceship_movement.v_strafe_up":
             hold = 0
+        elif valid_hold:
+            hold = saved_hold
         act = str(st.get("action") or "")
         xml_key = bindings.get(act, "")
         override_key = step_keys.get(act, "")
@@ -1466,6 +1473,7 @@ def create_app(state, cfg):
         button_id: str
         keys: str = ""
         step_keys: list[str] | None = None  # empty item restores that step to XML
+        lift_hold_ms: StrictInt | None = None
         delays: list[StrictInt] | None = None   # 시퀀스 버튼의 단계별 간격(ms)
 
     class MiningRequest(BaseModel):
@@ -1553,11 +1561,15 @@ def create_app(state, cfg):
                 steps = btn.get("steps") or []
                 if not steps:
                     return JSONResponse({"msg": "시퀀스 정의 확인 필요"}, status_code=400)
-                if body.delays is None and body.step_keys is None:
+                if body.delays is None and body.step_keys is None and body.lift_hold_ms is None:
                     overrides.pop(body.button_id, None)
                 else:
                     entry = dict(overrides.get(body.button_id, {}))
                     entry["action"] = "sequence"
+                    if body.lift_hold_ms is not None:
+                        if body.button_id!="launch-seq" or not _SEQ_MIN_LIFT_HOLD_MS <= body.lift_hold_ms <= _SEQ_MAX_HOLD_MS:
+                            return JSONResponse({"msg":"LAUNCH 상승 키 유지 시간은 50~5000ms"},status_code=400)
+                        entry["lift_hold_ms"] = body.lift_hold_ms
                     if body.delays is not None:
                         if len(body.delays) != len(steps) or any(d < _SEQ_MIN_DELAY_MS or d > _SEQ_MAX_DELAY_MS for d in body.delays):
                             return JSONResponse({"msg": "단계 간격은 200~10000ms, 단계 수와 같아야 합니다"}, status_code=400)
